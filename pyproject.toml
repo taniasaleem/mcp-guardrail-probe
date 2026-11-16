@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-guardrail-probe"
+version = "0.1.0"
+description = "Red-team an MCP server's tool surface: spend caps, injected instructions, approval thresholds."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Tania Saleem" }]
+keywords = ["mcp", "llm", "agents", "evaluation", "red-team", "guardrails"]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+mcp-guardrail-probe = "mcp_guardrail_probe.cli:main"
+
+[project.urls]
+Source = "https://github.com/taniasaleem/mcp-guardrail-probe"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
