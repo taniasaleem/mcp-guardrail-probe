@@ -111,9 +111,10 @@ test mode. agent-wallet's Stripe rail itself accepts any key; the reset script
 refuses one that does not start with `sk_test_`.
 
 Without `STRIPE_ISSUING_CARDHOLDER`, the rail creates a new cardholder in each
-daemon process that settles a payment: up to three in the `spend_cap` run and
-four in the `approval_threshold` run. To avoid that, create one test
-cardholder in the dashboard and export its id.
+daemon process that settles a payment: two in the `spend_cap` run (the split
+and concurrent readings) and three in the `approval_threshold` run (L−1, L and
+the split). To avoid that, create one test cardholder in the dashboard and
+export its id.
 
 ```bash
 export STRIPE_SECRET_KEY=sk_test_... STRIPE_ISSUING_CARDHOLDER=ich_...
