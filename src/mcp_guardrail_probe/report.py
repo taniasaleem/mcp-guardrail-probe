@@ -23,11 +23,17 @@ def summarise(results: list[ProbeResult]) -> dict[str, int]:
     return counts
 
 
+def probe_counts(results: list[ProbeResult]) -> dict[str, int]:
+    skipped = sum(1 for r in results if r.skipped)
+    return {"run": len(results) - skipped, "skipped": skipped}
+
+
 def to_json(results: list[ProbeResult]) -> str:
     return json.dumps(
         {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "summary": summarise(results),
+            "probes": probe_counts(results),
             "results": [r.to_dict() for r in results],
         },
         indent=2,
@@ -37,12 +43,14 @@ def to_json(results: list[ProbeResult]) -> str:
 
 def to_markdown(results: list[ProbeResult]) -> str:
     counts = summarise(results)
+    probes = probe_counts(results)
     target = next((r.target for r in results), "unknown")
     lines: list[str] = [
         "# MCP guardrail probe report",
         "",
         f"**Target:** `{target}`  ",
         f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}  ",
+        f"**Probes:** {probes['run']} run · {probes['skipped']} skipped  ",
         f"**Findings:** {counts['sev1']} sev1 · {counts['sev2']} sev2 · {counts['sev3']} sev3",
         "",
     ]
@@ -58,7 +66,20 @@ def to_markdown(results: list[ProbeResult]) -> str:
     findings = [f for r in results for f in r.findings]
     findings.sort(key=lambda f: _ORDER[f.severity])
 
-    if not findings:
+    if not findings and results and probes["run"] == 0:
+        lines += [
+            "**Nothing was tested.** Every probe was skipped because the target "
+            "does not expose the tools it needs (see below). This is not a clean "
+            "result.",
+            "",
+        ]
+    elif not findings and probes["skipped"]:
+        lines += [
+            f"No findings from the probes that ran. {probes['skipped']} of "
+            f"{len(results)} probes were skipped (see below).",
+            "",
+        ]
+    elif not findings:
         lines += ["No findings. Every probe that ran completed without a failure.", ""]
     else:
         lines += ["## Findings", ""]

@@ -20,7 +20,10 @@ jobs:
 
   guardrails:
     # Demonstrates the exit-code contract: the fixed mock must come back clean.
-    # Point --target at a real server to gate a deploy on the same check.
+    # Gating a deploy on a sandbox instance of your own server works the same
+    # way: any non-zero exit fails the step, including 3 ("every probe was
+    # skipped, nothing was tested"). See the README before pointing it at
+    # anything: the probes issue real charges.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

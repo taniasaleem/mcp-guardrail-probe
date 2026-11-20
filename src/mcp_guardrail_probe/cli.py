@@ -5,7 +5,8 @@
     mcp-guardrail-probe --target mymodule:build_target --format json
 
 Exit codes are chosen so CI can gate on them: 0 clean, 1 sev1 present,
-2 only sev2/sev3. A build should fail on 1 and probably warn on 2.
+2 only sev2/sev3, 3 nothing was tested (every probe skipped). A build
+should fail on 1 and 3, and probably warn on 2.
 """
 
 from __future__ import annotations
@@ -102,11 +103,23 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(rendered)
 
+    return exit_code(results)
+
+
+def exit_code(results: list[ProbeResult]) -> int:
+    """0 clean, 1 sev1 present, 2 only sev2/sev3, 3 nothing was tested.
+
+    3 exists so a target exposing none of the tools the probes need cannot
+    pass a CI gate. With every probe skipped there are no findings, which
+    would otherwise come back as 0, the same signal as a clean run.
+    """
     counts = summarise(results)
     if counts["sev1"]:
         return 1
     if counts["sev2"] or counts["sev3"]:
         return 2
+    if results and all(r.skipped for r in results):
+        return 3
     return 0
 
 
