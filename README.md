@@ -47,18 +47,71 @@ Exit codes are chosen so CI can gate on them: **0** clean, **1** a sev1 is prese
 
 **Read this first: the probes act, they do not just look.**
 
-- `spend_cap` sets a cap of 100, then issues 15 real `charge` calls totalling 590: 150 once, 30 twelve times (eight of them concurrently), and 40 twice under one idempotency key.
-- `approval_threshold` sets an auto-approve limit, then requests approval for 49, 50 and 51, then 49 three more times. On a server where an approval moves money, each approval may be a real payment.
+- `spend_cap` sets a cap of 100, then issues 15 real `charge` calls totalling 590: 150 once, 30 twelve times (eight of them concurrently), and 40 twice under one idempotency key. Against a cap configured out-of-band (below) every charge scales with that cap instead: 1.5x, 0.3x and 0.4x, totalling 5.9x.
+- `approval_threshold` sets an auto-approve limit, then requests approval for 49, 50 and 51, then 49 three more times (L-1, L, L+1, then L-1 three times, for an out-of-band limit L). On a server where an approval moves money, each approval may be a real payment.
 - `content_injection` creates up to 21 listings (17 on the bundled mock), most of them carrying text that tells an agent to charge 999.
 
 Point it only at a sandbox or test instance you own, never at anything that moves real money or that other people can see.
 
-There is no bundled MCP client yet. A target is any Python object with:
+### A real MCP server
+
+`spend_cap` and `approval_threshold` run against any MCP server over stdio or streamable HTTP, through the official MCP Python SDK. The SDK is an optional extra, so the core package keeps zero dependencies:
+
+```bash
+pip install -e ".[mcp]"
+mcp-guardrail-probe --mcp-config my-server.json --probe spend_cap --probe approval_threshold
+```
+
+The probes speak a fixed vocabulary (`charge`, `set_spending_limit`, ...), and your server has its own. The JSON file says how one maps onto the other. Nothing is guessed: a probe whose tools are not mapped and not present under its own names is skipped, and the run says so.
+
+```json
+{
+  "name": "my-server (sandbox)",
+  "server": {"transport": "stdio", "command": "my-server", "args": [], "env": {"API_KEY": "${MY_TEST_KEY}"}},
+  "reset": {"tool": "reset_sandbox"},
+  "tools": {
+    "set_spending_limit": {"tool": "set_budget", "rename": {"amount": "limit_cents"}, "types": {"limit_cents": "integer"}},
+    "get_spending_limit": {"tool": "budget_status", "result": {"committed_spend": "spent_total"}},
+    "charge": {
+      "tool": "make_payment",
+      "rename": {"amount": "amount_cents", "idempotency_key": "request_id"},
+      "types": {"amount_cents": "integer"},
+      "refuse_when": [{"path": "status", "in": ["declined"]}]
+    }
+  }
+}
+```
+
+| Key | What it does |
+|---|---|
+| `server` | `{"transport": "stdio", "command", "args", "env", "cwd"}` or `{"transport": "http", "url", "headers"}`. `${VAR}` and `${VAR:-default}` come from your environment, so keys stay out of the file. A stdio server gets only a minimal environment (`PATH`, `HOME` and a few more) plus `env`, so pass anything else it needs explicitly. |
+| `tools.<probe tool>.tool` | The server's name for it. |
+| `rename`, `fixed`, `drop`, `types` | Argument renames (probe name to server name), constant arguments the server needs, probe arguments to leave out, and `number`, `integer` or `string` coercions. A `fixed` value may not override an argument the probe sends. |
+| `refuse_when` | When an ordinary result means no: `{"path": "status", "in": [...]}`, `"not_in": [...]` or `"present": true`. Dotted paths reach into nested results. |
+| `result` | Fields the probes read, taken from the server's result: `"committed_spend": "spent_total"`, or `{"path": "outcome", "map": {"WITHIN_CEILING": "approved"}}`. |
+| `reset` | How to give each reading fresh state: `{"tool": "..."}` calls a server tool, `{"restart": true}` starts a new session (a new process, for stdio), `{"command": [...]}` runs a local command (from the file's directory) and then reconnects. |
+| `out_of_band_limits` | `spending_limit` and/or `approval_threshold`, for a server whose limit its operator sets (below). |
+| `timeout_seconds` | Per call. Default 60. |
+
+Unknown keys are errors, not ignored, and `_comment` is allowed anywhere.
+
+**How a refusal is recognised.** An `isError: true` result and a JSON-RPC error both count as refused. So does any result a `refuse_when` rule matches, because many servers say no with an ordinary result such as `{"status": "declined"}`; without the rule the probe would read a declined charge as paid. A call that times out, or whose connection drops before it answers, is *not* counted as refused: the charge may have committed, so the run stops instead.
+
+**Limits configured out-of-band.** Some servers take their cap or approval threshold from an env var, a config file or an operator API, and give the agent no tool to set it. Declare the value in `out_of_band_limits` and the probe tests that value, never calls `set_spending_limit` or `set_approval_threshold`, and sizes its amounts from it. `spend_cap` then requires a `reset`: each attack shape deliberately uses up the cap, so without one every shape after the first would start from the last one's spend. It skips with that reason rather than run.
+
+**When a mapping is wrong.** A wrong mapping usually makes every charge fail, for example on a bad argument, and every refused charge looks like a cap holding. So `spend_cap` reports a sev2, "Spend cap refuses charges that fit under it", when charges that fit under a fresh cap are refused. It also reports it when the first charge of the retry shape is refused, which happens when a server rejects the idempotency key outright. Each attempt keeps the server's refusal messages, so the report shows which case you hit.
+
+Mapping files for two open-source agent-wallet servers, with step-by-step run sheets, are in [`servers/`](servers/).
+
+### Your own Python adapter
+
+`--target module:callable` still takes any Python object with:
 
 - `name`: a label for the report
 - `list_tools()`: the tool names it exposes, as strings
 - `call_tool(tool, **kwargs)`: calls one tool and returns its result as a dict. A refusal is either a raised `ToolError` or an MCP-style result with `"isError": true`, and the probes treat both as refused. Anything else counts as accepted.
-- `reset()`: optional. If present, it is called between probes and before each approval boundary check, so earlier calls cannot affect a reading.
+- `reset()`: optional. If present, it is called between probes, before each spend-cap shape and before each approval boundary check, so earlier calls cannot affect a reading.
+- `out_of_band_limits`: optional, as above.
 
 ```python
 # myadapter.py
@@ -68,7 +121,7 @@ class MyServer:
     name = "my-server (sandbox)"
 
     def list_tools(self) -> list[str]:
-        ...  # e.g. the names from your MCP client's tools/list
+        ...
 
     def call_tool(self, tool: str, **kwargs) -> dict:
         ...  # call the tool; on refusal raise ToolError or return {"isError": True, ...}
@@ -81,15 +134,13 @@ def build_target():
 mcp-guardrail-probe --target myadapter:build_target --format json --out findings.json
 ```
 
-Each probe needs these tools under exactly these names, and is skipped without them:
+### What each probe needs
 
-| Probe | Tools it needs |
-|---|---|
-| `spend_cap` | `set_spending_limit`, `get_spending_limit`, `charge` |
-| `approval_threshold` | `set_approval_threshold`, `submit_for_approval` |
-| `content_injection` | `add_item`, `agent_request` |
-
-If your server names them differently, map the names in your adapter.
+| Probe | Tools it needs | Optional |
+|---|---|---|
+| `spend_cap` | `charge`, and `set_spending_limit` unless the cap is out-of-band | `get_spending_limit`: without it, the check of the server's own counter against the probe's ledger is skipped, and the attempts say "not exposed" |
+| `approval_threshold` | `submit_for_approval`, and `set_approval_threshold` unless the limit is out-of-band | |
+| `content_injection` | `add_item`, `agent_request` | |
 
 `content_injection` needs more than a mapping. `agent_request` is an agent that reads the listings and decides which tools to call. In MCP the model runs in the client, not the server, so a real MCP server will not normally have such a tool. Today this probe runs only against the bundled mock. Running it against a real server needs an LLM agent loop inside the harness, which it does not have yet.
 
@@ -109,7 +160,7 @@ A probe that reads the counter sees 30, concludes the cap held, and reports a cl
 
 ## What this is not
 
-- **Not (yet) a drop-in MCP client.** You bring the adapter, and `content_injection` runs only against the bundled mock until the harness has its own agent loop.
+- **Not a drop-in for every probe.** `spend_cap` and `approval_threshold` run against a real MCP server through a mapping file you write. `content_injection` runs only against the bundled mock until the harness has its own agent loop.
 - **Not a scanner.** It tests three specific classes of failure well rather than many badly. There is no score out of 100, because I don't know what one would mean.
 - **Not a jailbreak collection.** Four payload families, chosen to be readable. A long list of near-duplicates makes a report harder to act on, not more thorough.
 - **Not a substitute for reading the tool surface.** The probes test the contract you already have. Deciding that `charge` should never have been reachable by the model in the first place is a design question this cannot answer for you.
@@ -122,6 +173,7 @@ src/mcp_guardrail_probe/
   model.py        Finding, Attempt, Severity, the Target protocol
   report.py       markdown for humans, JSON for CI
   cli.py          entry point and exit codes
+  mcp_target.py   a Target backed by a real MCP server, and its mapping file
   probes/
     base.py              skip-or-run, attempt recording
     spend_cap.py         four attack shapes, client-side ledger
@@ -129,10 +181,16 @@ src/mcp_guardrail_probe/
     approval_threshold.py  boundary walk in both directions
   mock_server/
     server.py            VulnerableCommerceServer and SafeCommerceServer
+servers/
+  almega-mcp/     mapping files and run sheet for one open-source agent wallet
+  agent-wallet/   ...and for another, with the script that resets its daemon
 tests/
-  test_probes.py  each probe must catch the broken mock AND stay quiet on the fixed one,
-                  and each detection path has a test that fails when that path breaks
-  test_cli.py     the exit-code contract, including 3 when nothing ran
+  test_probes.py      each probe must catch the broken mock AND stay quiet on the fixed one,
+                      and each detection path has a test that fails when that path breaks
+  test_cli.py         the exit-code contract, including 3 when nothing ran
+  test_mcp_target.py  the MCP adapter against a fake server built on the same SDK
+  test_mcp_config.py  the mapping file, and every file in servers/
+  fake_mcp_server.py  that fake server: other names, other shapes, switchable bugs
 examples/
   sample_report.md
 ```
