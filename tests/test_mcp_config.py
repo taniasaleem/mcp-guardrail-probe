@@ -143,6 +143,38 @@ def test_refuse_when_rules():
         mapping.interpret({"something": "else"})
 
 
+def test_a_result_map_matches_json_true_false_null_and_numbers():
+    """A map is JSON, so its keys are written "true", "null", "2", never "True"."""
+    mapping = ToolMapping.parse(
+        "submit_for_approval",
+        {
+            "result": {
+                "decision": {
+                    "path": "auto",
+                    "map": {"true": "approved", "false": "escalated", "null": "unknown", "2": "held"},
+                }
+            }
+        },
+    )
+    assert mapping.interpret({"auto": True})["decision"] == "approved"
+    assert mapping.interpret({"auto": False})["decision"] == "escalated"
+    assert mapping.interpret({"auto": None})["decision"] == "unknown"
+    assert mapping.interpret({"auto": 2})["decision"] == "held"
+    assert mapping.interpret({"auto": "true"})["decision"] == "approved"  # a string stays as-is
+
+
+def test_refuse_rules_do_not_treat_true_as_1():
+    """Python says True == 1; a JSON config author does not."""
+    not_one = ToolMapping.parse("charge", {"refuse_when": [{"path": "code", "not_in": [1]}]})
+    with pytest.raises(ToolError, match="code=True"):
+        not_one.interpret({"code": True})
+    assert not_one.interpret({"code": 1})["code"] == 1
+    is_true = ToolMapping.parse("charge", {"refuse_when": [{"path": "declined", "in": [True]}]})
+    assert is_true.interpret({"declined": 1})["declined"] == 1
+    with pytest.raises(ToolError, match="declined=True"):
+        is_true.interpret({"declined": True})
+
+
 def test_result_fields_are_mapped_and_the_rest_kept():
     mapping = ToolMapping.parse(
         "submit_for_approval",

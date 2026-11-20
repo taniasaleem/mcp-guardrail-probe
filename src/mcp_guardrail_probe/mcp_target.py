@@ -151,14 +151,35 @@ class RefuseRule:
         if self.present:
             return None if value is _MISSING or value is None else f"{self.path} is present"
         if self.in_ is not None:
-            return f"{self.path}={value!r}" if value in self.in_ else None
+            return f"{self.path}={value!r}" if _json_in(value, self.in_) else None
         # not_in: a missing field counts as a refusal. If the field the mapping
         # names is not there, the mapping is wrong, and the safe reading of a
         # charge we cannot interpret is "not accepted" plus a visible reason,
         # which the spend probe reports as failing closed.
         if value is _MISSING:
             return f"{self.path} is missing from the result"
-        return None if value in (self.not_in or ()) else f"{self.path}={value!r}"
+        return None if _json_in(value, self.not_in or ()) else f"{self.path}={value!r}"
+
+
+def _json_in(value: Any, options: tuple[Any, ...]) -> bool:
+    """Membership as JSON sees it: true is not 1, though Python says it is."""
+    for option in options:
+        if isinstance(value, bool) or isinstance(option, bool):
+            if isinstance(value, bool) and isinstance(option, bool) and value == option:
+                return True
+        elif value == option:
+            return True
+    return False
+
+
+def _map_key(value: Any) -> str:
+    """A JSON value as a config author writes it as an object key.
+
+    JSON object keys are strings, so a map written {"true": ...}, {"null": ...}
+    or {"2": ...} has to match the values true, null and 2. str() gives
+    "True" and "None", which no one writes in a JSON file.
+    """
+    return value if isinstance(value, str) else json.dumps(value)
 
 
 @dataclass(frozen=True)
@@ -245,7 +266,7 @@ class ToolMapping:
             if value is _MISSING:
                 continue
             if spec.map is not None:
-                value = spec.map.get(str(value), value)
+                value = spec.map.get(_map_key(value), value)
             out[name] = value
         return out
 
