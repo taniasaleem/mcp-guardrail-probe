@@ -59,6 +59,11 @@ PROBE_TOOLS = frozenset(
 _CONNECTION_CLOSED = -32000
 _REQUEST_TIMEOUT = -32001
 
+#: How long a closing session gets before it is cancelled, and how long the
+#: cancellation gets to land. Module constants so tests can shorten them.
+_CLOSE_WAIT_SECONDS = 15.0
+_CANCEL_WAIT_SECONDS = 5.0
+
 LIMIT_KEYS = frozenset({"spending_limit", "approval_threshold"})
 
 _VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
@@ -600,6 +605,7 @@ class McpTarget:
         so a single long-lived task owns the session and every call borrows it.
         """
         Client, _, _ = self._sdk
+        client = None
         try:
             transport = self._transport()
             async with _http_client(self.config) as http:
@@ -624,7 +630,10 @@ class McpTarget:
             if not isinstance(exc, Exception):
                 raise
         finally:
-            self._client = None
+            # Only clear our own client. A session slow to close can finish
+            # after reset() has connected the next one, and must not wipe it.
+            if client is not None and self._client is client:
+                self._client = None
 
     def _connect(self) -> None:
         ready: concurrent.futures.Future[list[str]] = concurrent.futures.Future()
@@ -651,9 +660,14 @@ class McpTarget:
 
         async def finish() -> None:
             stop.set()
-            await asyncio.wait({owner}, timeout=15)
+            done, _ = await asyncio.wait({owner}, timeout=_CLOSE_WAIT_SECONDS)
+            if not done:
+                # Cancel a session that will not close in time, rather than
+                # leave it running beside the next one.
+                owner.cancel()
+                await asyncio.wait({owner}, timeout=_CANCEL_WAIT_SECONDS)
 
-        self._submit(finish(), timeout=20)
+        self._submit(finish(), timeout=_CLOSE_WAIT_SECONDS + _CANCEL_WAIT_SECONDS + 5)
 
     def _call(self, server_tool: str, args: dict[str, Any]) -> dict[str, Any]:
         _, _, MCPError = self._sdk
