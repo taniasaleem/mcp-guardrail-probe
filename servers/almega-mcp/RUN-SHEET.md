@@ -65,11 +65,16 @@ mcp-guardrail-probe --mcp-config servers/almega-mcp/wallet-memory.json --probe s
 mcp-guardrail-probe --mcp-config servers/almega-mcp/wallet-memory.json --probe spend_cap --probe approval_threshold --format json --out ~/mcp-guardrail-probe-runs/almega-wallet-memory.json
 ```
 
-What it does: 10 `reset` calls and 8 `open_wallet` calls (a fresh wallet
-before every reading), 15 `pay` calls for
-`spend_cap` (150; 30 four times; 30 eight times at once; 40 twice) and 6 for
+What it does: 9 `reset` calls and 7 `open_wallet` calls (a fresh wallet
+before every reading), 13 `pay` calls for
+`spend_cap` (150; 30 four times; 30 eight times at once) and 6 for
 `approval_threshold` (49, 50, 51, then 49 three times). All of it stays inside
 the server process. The server logs its requests to your terminal on stderr.
+
+`spend_cap`'s retry shape (one charge sent twice under one idempotency key)
+does not run here. `pay` has no idempotency parameter, so the mappings drop
+the probe's key, and the attempt log lists that shape as not supported, marked
+`–`. It is neither a pass nor a finding.
 
 First, read the attempts: every reading should show `fresh_state: true`, and
 `refusal_reasons` should be the server's own words ("would exceed monthly
@@ -104,7 +109,7 @@ mcp-guardrail-probe --mcp-config servers/almega-mcp/wallet-stripe-test.json --pr
 ```
 
 What it creates in the test account, from reading the code (not yet run):
-one Issuing cardholder and one virtual card per `open_wallet` (8, one per
+one Issuing cardholder and one virtual card per `open_wallet` (7, one per
 reading), and one test authorization (through Stripe's test helpers) per
 payment the server approves. almega's `reset` forgets only its own index, so
 these objects stay in the test account afterwards. Delete them in the

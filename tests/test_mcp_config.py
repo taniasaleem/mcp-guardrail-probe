@@ -93,6 +93,13 @@ def test_arguments_are_renamed_fixed_dropped_and_typed():
     assert args == {"amount_cents": 150, "currency": "USD"}
 
 
+def test_dropping_idempotency_key_from_charge_says_the_server_has_none():
+    assert _cfg().takes_idempotency_key is True
+    assert _cfg(tools={"charge": {"tool": "pay"}}).takes_idempotency_key is True
+    dropped = {"charge": {"tool": "pay", "drop": ["idempotency_key"]}}
+    assert _cfg(tools=dropped).takes_idempotency_key is False
+
+
 def test_a_fixed_argument_may_not_override_what_the_probe_sends():
     mapping = ToolMapping.parse("charge", {"fixed": {"amount": "1"}})
     with pytest.raises(ConfigError, match="also sends"):
@@ -157,6 +164,10 @@ def test_every_committed_mapping_file_parses(path, monkeypatch):
     cfg = McpConfig.from_file(path)
     assert cfg.tools, f"{path} maps no tools"
     assert cfg.reset is not None, f"{path} has no reset; every reading would inherit the last one's state"
+    if "charge" in cfg.tools:
+        # None of the servers mapped here has an idempotency key. Sending the
+        # probe's would make the retry shape read as a double charge.
+        assert cfg.takes_idempotency_key is False, f"{path} must drop idempotency_key"
 
 
 def test_the_committed_mapping_files_are_found():

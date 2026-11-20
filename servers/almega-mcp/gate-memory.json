@@ -42,8 +42,11 @@
       }
     },
     "charge": {
-      "_comment": "pay is sugar over request(kind='payment'); only decision ALLOWED moved spend. No idempotency parameter; the probe's key is ignored.",
+      "_comment": "pay is sugar over request(kind='payment'); only decision ALLOWED moved spend. pay has no idempotency parameter, so the mapping drops the probe's key and the retry shape is reported as not supported.",
       "tool": "pay",
+      "drop": [
+        "idempotency_key"
+      ],
       "types": {
         "amount": "number"
       },

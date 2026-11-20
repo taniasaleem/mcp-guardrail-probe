@@ -16,6 +16,7 @@ from mcp_guardrail_probe.probes import (
     SpendCapProbe,
 )
 from mcp_guardrail_probe.mock_server import SafeCommerceServer, VulnerableCommerceServer
+from mcp_guardrail_probe.report import to_markdown
 
 
 # -- spend cap ---------------------------------------------------------
@@ -48,8 +49,7 @@ def test_spend_cap_worst_overspend_is_the_concurrent_race():
     """The headline: 8 x 30 racing a cap of 100, all accepted, 140 over.
 
     Fails if the probe trusts the server's counter (which says 30), or stops
-    issuing the charges concurrently, or the mock's race disappears; in each
-    case the retry shape's 40 would quietly become the worst.
+    issuing the charges concurrently, or the mock's race disappears.
     """
     finding = _finding(SpendCapProbe().run(VulnerableCommerceServer()), "Spend cap does not hold")
     assert finding.metric["worst_shape"] == "concurrent charges racing the balance"
@@ -57,9 +57,53 @@ def test_spend_cap_worst_overspend_is_the_concurrent_race():
 
 
 def test_spend_cap_catches_a_double_charge_on_retry():
-    attempt = _attempt(SpendCapProbe().run(VulnerableCommerceServer()), "idempotency key")
-    assert not attempt.passed
+    result = SpendCapProbe().run(VulnerableCommerceServer())
+    attempt = _attempt(result, "idempotency key")
+    assert attempt.passed is False
     assert attempt.state_after["accepted"] == "80"
+    finding = _finding(result, "A retried charge is charged twice")
+    assert finding.severity is Severity.SEV1
+    assert finding.direction is Direction.FAIL_OPEN
+    assert finding.metric["accepted_total"] == "80"
+    assert finding.metric["expected_total"] == "40"
+
+
+class IgnoresIdempotencyKeyServer(SafeCommerceServer):
+    """The cap holds; the idempotency key is accepted and never consulted."""
+
+    name = "mock://safe-cap-no-idempotency"
+
+    def __init__(self):
+        self.charge_kwargs = []
+        super().__init__()
+
+    def _tool_charge(self, amount, idempotency_key=None):
+        self.charge_kwargs.append(idempotency_key)
+        return super()._tool_charge(amount)
+
+
+def test_a_double_charge_on_retry_is_not_reported_as_the_cap_failing():
+    """40 + 40 fits under a cap of 100: the cap held, the retry did not."""
+    result = SpendCapProbe().run(IgnoresIdempotencyKeyServer())
+    assert [f.title for f in result.findings] == ["A retried charge is charged twice"]
+
+
+class NoIdempotencyKeyServer(IgnoresIdempotencyKeyServer):
+    """The same server, saying so: its charge takes no idempotency key."""
+
+    name = "mock://safe-cap-says-no-idempotency"
+    takes_idempotency_key = False
+
+
+def test_a_target_without_an_idempotency_key_gets_the_retry_reported_as_not_supported():
+    target = NoIdempotencyKeyServer()
+    result = SpendCapProbe().run(target)
+    assert not result.findings, [f.title for f in result.findings]
+    attempt = _attempt(result, "idempotency key")
+    assert attempt.passed is None
+    assert attempt.actual.startswith("not run")
+    assert target.charge_kwargs and set(target.charge_kwargs) == {None}  # no key ever sent
+    assert "| – |" in to_markdown([result])
 
 
 def test_spend_cap_reports_the_counter_disagreeing_with_its_ledger():

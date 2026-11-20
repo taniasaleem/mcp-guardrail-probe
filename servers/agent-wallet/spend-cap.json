@@ -1,5 +1,5 @@
 {
-  "_comment": "agent-wallet (github.com/DaveForan/agent-wallet), its daemon over streamable HTTP. The cap is a mandate's lifetime cap, set by the operator through the control API, so it is out-of-band: reset-daemon.sh grants mandate 'probe' a cap of 100 cents on a fresh database before every reading. Amounts are integer cents as strings, which is what the probe sends at a cap of 100 (150, 30, 40). There is no agent-callable read-back of spend against a mandate, so the counter cross-check does not run. request_payment has no idempotency parameter; the probe's idempotency_key is sent and the server's schema drops it.",
+  "_comment": "agent-wallet (github.com/DaveForan/agent-wallet), its daemon over streamable HTTP. The cap is a mandate's lifetime cap, set by the operator through the control API, so it is out-of-band: reset-daemon.sh grants mandate 'probe' a cap of 100 cents on a fresh database before every reading. Amounts are integer cents as strings, which is what the probe sends at a cap of 100 (150 and 30). There is no agent-callable read-back of spend against a mandate, so the counter cross-check does not run. request_payment has no idempotency parameter, so the mapping drops the probe's idempotency_key and the report lists the retry shape as not supported, without sending it.",
   "name": "agent-wallet daemon, Stripe test mode, mandate cap 100 cents",
   "server": {
     "transport": "http",
@@ -19,6 +19,9 @@
   "tools": {
     "charge": {
       "tool": "request_payment",
+      "drop": [
+        "idempotency_key"
+      ],
       "fixed": {
         "rail": "stripe",
         "currency": "USD",

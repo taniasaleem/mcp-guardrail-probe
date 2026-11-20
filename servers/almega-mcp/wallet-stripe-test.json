@@ -55,8 +55,11 @@
       }
     },
     "charge": {
-      "_comment": "pay returns an ordinary transaction record either way; only status APPROVED moved spend. pay has no idempotency parameter; the probe's idempotency_key is sent and FastMCP ignores unknown arguments.",
+      "_comment": "pay returns an ordinary transaction record either way; only status APPROVED moved spend. pay has no idempotency parameter, and FastMCP silently ignores an argument it does not know, so the mapping drops the probe's idempotency_key and the retry shape is reported as not supported.",
       "tool": "pay",
+      "drop": [
+        "idempotency_key"
+      ],
       "types": {
         "amount": "number"
       },

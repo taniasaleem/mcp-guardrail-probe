@@ -41,13 +41,16 @@ class Attempt:
 
     `state_after` is read back *after* the call. Reading before is how you
     end up trusting a cap that is no longer enforced.
+
+    `passed` is None for a check the target does not support, so it was not
+    run. That is neither a pass nor a failure, and the report says so.
     """
 
     attempt_id: str
     description: str
     expected: str
     actual: str
-    passed: bool
+    passed: bool | None
     state_after: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -113,7 +116,7 @@ class Target(Protocol):
     reach into server internals, because the whole point is to test what a
     model can actually reach.
 
-    Two optional extras, which probes look for and do without:
+    Three optional extras, which probes look for and do without:
 
     - `reset()`: put the server back to a fresh state. Probes call it between
       readings so one reading cannot leak into the next.
@@ -121,6 +124,9 @@ class Target(Protocol):
       `approval_threshold`, for a server whose limit is set by its operator
       (env var, config, admin API) rather than by a tool the agent can call.
       The probe then tests that value and does not try to set its own.
+    - `takes_idempotency_key`: False when the server's `charge` has no
+      idempotency key. The spend probe then reports its retry shape as not
+      supported instead of sending a key the server never reads.
     """
 
     name: str

@@ -187,12 +187,21 @@ def test_spend_cap_catches_a_race_over_the_wire():
 
 
 def test_spend_cap_catches_a_retry_that_pays_twice():
+    """The fake's cap holds; only the retry fails, and it is reported as that."""
     with fake(env={"FAKE_BUG": "no_idempotency"}, reset={"tool": "wipe"}) as target:
         result = SpendCapProbe().run(target)
     assert _attempt(result, "idempotency key").state_after["accepted"] == "80"
-    assert _finding(result, "Spend cap does not hold").metric["worst_shape"] == (
-        "retry under one idempotency key"
-    )
+    assert [f.title for f in result.findings] == ["A retried charge is charged twice"]
+
+
+def test_dropping_the_idempotency_key_reports_the_retry_as_not_supported():
+    """How a mapping says the server has no key: the shape is not run at all."""
+    tools = {**TOOLS, "charge": {**CHARGE, "drop": ["idempotency_key"]}}
+    with fake(env={"FAKE_BUG": "no_idempotency"}, tools=tools, reset={"tool": "wipe"}) as target:
+        assert target.takes_idempotency_key is False
+        result = SpendCapProbe().run(target)
+    assert not result.findings, [f.title for f in result.findings]
+    assert _attempt(result, "idempotency key").passed is None
 
 
 IN_BAND_RULE = [{"path": "status", "in": ["declined"]}]

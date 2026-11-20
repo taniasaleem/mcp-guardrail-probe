@@ -35,6 +35,11 @@ def out_of_band_limit(target: Target, key: str) -> Decimal | None:
     return None if value is None else Decimal(str(value))
 
 
+def takes_idempotency_key(target: Target) -> bool:
+    """False only when the target says its charge has no idempotency key."""
+    return getattr(target, "takes_idempotency_key", True) is not False
+
+
 class Probe(ABC):
     name: str = "probe"
     description: str = ""
@@ -53,7 +58,7 @@ class Probe(ABC):
         description: str,
         expected: str,
         actual: str,
-        passed: bool,
+        passed: bool | None,
         state_after: dict[str, Any] | None = None,
     ) -> Attempt:
         attempt = Attempt(

@@ -123,7 +123,7 @@ def to_markdown(results: list[ProbeResult]) -> str:
             "|---|---|---|---|---|",
         ]
         for probe, a in attempts:
-            ok = "✓" if a.passed else "✗"
+            ok = "–" if a.passed is None else "✓" if a.passed else "✗"
             lines.append(
                 f"| `{a.attempt_id}` | {a.description} | {a.expected} | {a.actual} | {ok} |"
             )

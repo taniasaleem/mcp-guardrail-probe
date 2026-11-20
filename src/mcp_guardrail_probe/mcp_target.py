@@ -295,6 +295,17 @@ class McpConfig:
     tools: dict[str, ToolMapping] = field(default_factory=dict)
     base_dir: Path = Path(".")
 
+    @property
+    def takes_idempotency_key(self) -> bool:
+        """False when the charge mapping drops idempotency_key.
+
+        Dropping it is how a mapping says the server has none: the key never
+        reaches the server, so the spend probe's retry shape would test
+        nothing, and is reported as not supported instead.
+        """
+        charge = self.tools.get("charge")
+        return charge is None or "idempotency_key" not in charge.drop
+
     @classmethod
     def from_file(cls, path: str | os.PathLike[str]) -> McpConfig:
         path = Path(path)
@@ -420,6 +431,7 @@ class McpTarget:
         self.config = config
         self.name = config.name
         self.out_of_band_limits = dict(config.out_of_band_limits)
+        self.takes_idempotency_key = config.takes_idempotency_key
         if config.reset is not None:
             # Only a target that can really reset says it can. Probes look for
             # reset() to decide whether a reading started from fresh state.

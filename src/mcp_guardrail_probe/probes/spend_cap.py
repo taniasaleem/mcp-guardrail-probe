@@ -1,13 +1,20 @@
 """Spend-cap integrity.
 
 A spend cap is not a setting. It is a claim that total committed spend will
-not exceed a number, and that claim has to survive four things teams rarely
+not exceed a number, and that claim has to survive three things teams rarely
 test together:
 
   1. a single charge straight over the line
   2. several charges that individually fit and together do not
   3. concurrent charges racing the same remaining balance
-  4. a retry of a charge that already committed
+
+A fourth shape runs alongside them: the same charge submitted twice under one
+idempotency key, as a client does when it retries after a timeout. Both
+charges fit under the cap, so it says nothing about the cap. A second
+acceptance is reported as its own finding, "A retried charge is charged
+twice", and never counted as overspend. A target whose charge takes no
+idempotency key (`takes_idempotency_key = False`, or a mapping that drops the
+key) has that shape reported as not supported rather than run.
 
 **The probe keeps its own ledger.** It sums the charges the server *accepted*
 rather than reading the server's `committed_spend`, and this is the single
@@ -39,7 +46,7 @@ from decimal import Decimal
 from typing import Any
 
 from ..model import Direction, Finding, Severity, Target, ToolError
-from .base import Probe, can_reset, out_of_band_limit
+from .base import Probe, can_reset, out_of_band_limit, takes_idempotency_key
 
 DEFAULT_CAP = Decimal("100")
 
@@ -90,24 +97,24 @@ class SpendCapProbe(Probe):
         self.unit = self.cap * 3 / 10
         self.retry_unit = self.cap * 2 / 5
         self._refusals: list[str] = []
-        self._retry_first = Decimal("0")
+        #: The retry shape's first charge, or None when the shape did not run.
+        self._retry_first: Decimal | None = None
 
         findings: list[Finding] = []
         worst = Decimal("0")
         worst_shape = ""
         drift: tuple[Decimal, Decimal] | None = None
 
-        readings = [
-            shape(target)
-            for shape in (self._single, self._split, self._concurrent, self._retry)
-        ]
-        for accepted, reported, label, budget in readings:
-            over = accepted - budget
+        cap_readings = [shape(target) for shape in (self._single, self._split, self._concurrent)]
+        retry = self._retry(target)
+        for accepted, _, label in cap_readings:
+            over = accepted - self.cap
             if over > worst:
                 worst, worst_shape = over, label
+        for accepted, reported, _ in cap_readings + ([retry] if retry else []):
             if reported is not None and accepted != reported and drift is None:
                 drift = (accepted, reported)
-        split_accepted = readings[1][0]
+        split_accepted = cap_readings[1][0]
 
         if worst > 0:
             findings.append(
@@ -134,6 +141,43 @@ class SpendCapProbe(Probe):
                         "max_overspend": str(worst),
                         "worst_shape": worst_shape,
                         "threshold": "0 — any overspend is sev1",
+                    },
+                    attempts=list(self._attempts),
+                )
+            )
+
+        if retry is not None and retry[0] > self.retry_unit:
+            # sev1, not a cap finding: the server was handed the control that
+            # stops a duplicate payment and it did not hold, so money moved
+            # twice for one payment. Both charges fit under the cap, which is
+            # why this never feeds max_overspend above.
+            accepted = retry[0]
+            findings.append(
+                Finding(
+                    probe=self.name,
+                    title="A retried charge is charged twice",
+                    severity=Severity.SEV1,
+                    direction=Direction.FAIL_OPEN,
+                    summary=(
+                        f"The same charge of {self.retry_unit}, submitted twice under one "
+                        f"idempotency key, was accepted for {accepted} in total. The key "
+                        "did not stop the second charge, so any client that retries "
+                        "after a timeout pays again. If this server has no idempotency "
+                        "key at all, say so in the mapping (drop idempotency_key) and "
+                        "this shape is reported as not supported instead."
+                    ),
+                    reproduction=[
+                        self._set_cap_step(),
+                        f"charge(amount={self.retry_unit}, idempotency_key=K)",
+                        f"charge(amount={self.retry_unit}, idempotency_key=K) again, same K",
+                        f"observe {accepted} accepted in total, where {self.retry_unit} "
+                        "was intended",
+                    ],
+                    metric={
+                        "amount": str(self.retry_unit),
+                        "accepted_total": str(accepted),
+                        "expected_total": str(self.retry_unit),
+                        "threshold": "any second acceptance is sev1",
                     },
                     attempts=list(self._attempts),
                 )
@@ -181,7 +225,7 @@ class SpendCapProbe(Probe):
                 f"four sequential charges of {self.unit}: {split_accepted} accepted "
                 f"in total, where {fits} fit"
             )
-        if self._retry_first == 0:
+        if self._retry_first is not None and self._retry_first == 0:
             blocked.append(
                 f"a first charge of {self.retry_unit} carrying an idempotency key was refused"
             )
@@ -210,7 +254,9 @@ class SpendCapProbe(Probe):
                         "cap": str(self.cap),
                         "accepted_total": str(split_accepted),
                         "expected_total": str(fits),
-                        "retry_first_accepted": str(self._retry_first),
+                        "retry_first_accepted": (
+                            "not run" if self._retry_first is None else str(self._retry_first)
+                        ),
                     },
                     attempts=list(self._attempts),
                 )
@@ -297,7 +343,7 @@ class SpendCapProbe(Probe):
 
     # -- attack shapes -------------------------------------------------
 
-    def _single(self, target: Target) -> tuple[Decimal, Decimal | None, str, Decimal]:
+    def _single(self, target: Target) -> tuple[Decimal, Decimal | None, str]:
         self._start_fresh(target)
         accepted = self._charge(target, self.over)
         reported = self._reported(target)
@@ -308,9 +354,9 @@ class SpendCapProbe(Probe):
             reported,
             passed=accepted <= self.cap,
         )
-        return accepted, reported, "single over-limit charge", self.cap
+        return accepted, reported, "single over-limit charge"
 
-    def _split(self, target: Target) -> tuple[Decimal, Decimal | None, str, Decimal]:
+    def _split(self, target: Target) -> tuple[Decimal, Decimal | None, str]:
         self._start_fresh(target)
         accepted = sum(
             (self._charge(target, self.unit) for _ in range(4)), Decimal("0")
@@ -323,9 +369,9 @@ class SpendCapProbe(Probe):
             reported,
             passed=accepted <= self.cap,
         )
-        return accepted, reported, "split into sub-limit charges", self.cap
+        return accepted, reported, "split into sub-limit charges"
 
-    def _concurrent(self, target: Target) -> tuple[Decimal, Decimal | None, str, Decimal]:
+    def _concurrent(self, target: Target) -> tuple[Decimal, Decimal | None, str]:
         self._start_fresh(target)
         with ThreadPoolExecutor(max_workers=8) as pool:
             amounts = list(pool.map(lambda _: self._charge(target, self.unit), range(8)))
@@ -338,10 +384,24 @@ class SpendCapProbe(Probe):
             reported,
             passed=accepted <= self.cap,
         )
-        return accepted, reported, "concurrent charges racing the balance", self.cap
+        return accepted, reported, "concurrent charges racing the balance"
 
-    def _retry(self, target: Target) -> tuple[Decimal, Decimal | None, str, Decimal]:
-        """Both charges fit under the cap, so only idempotency is on trial."""
+    def _retry(self, target: Target) -> tuple[Decimal, Decimal | None, str] | None:
+        """Both charges fit under the cap, so only idempotency is on trial.
+
+        None when the target's charge takes no idempotency key: the shape would
+        then measure a second charge the server was never told was a retry.
+        """
+        if not takes_idempotency_key(target):
+            self.record(
+                "the same charge submitted twice under one idempotency key",
+                f"{self.retry_unit} accepted in total; the retry is a no-op",
+                "not run: the target's charge takes no idempotency key, so this "
+                "shape is not supported (not a pass, not a failure)",
+                passed=None,
+                state_after={"supported": False},
+            )
+            return None
         self._start_fresh(target)
         key = str(uuid.uuid4())
         first = self._charge(target, self.retry_unit, idem=key)
@@ -356,5 +416,4 @@ class SpendCapProbe(Probe):
             reported,
             passed=accepted <= self.retry_unit,
         )
-        # The budget for this shape is one charge, not the cap.
-        return accepted, reported, "retry under one idempotency key", self.retry_unit
+        return accepted, reported, "retry under one idempotency key"

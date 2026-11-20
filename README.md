@@ -8,7 +8,7 @@ It is small on purpose. Three probe families, a deliberately broken mock server 
 $ mcp-guardrail-probe --demo
 
 Probes: 3 run · 0 skipped
-Findings: 11 sev1 · 1 sev2 · 0 sev3
+Findings: 12 sev1 · 1 sev2 · 0 sev3
 
 ### 1. Spend cap does not hold
 sev1 · fail_open · probe spend_cap
@@ -47,7 +47,7 @@ Exit codes are chosen so CI can gate on them: **0** clean, **1** a sev1 is prese
 
 **Read this first: the probes act, they do not just look.**
 
-- `spend_cap` sets a cap of 100, then issues 15 real `charge` calls totalling 590: 150 once, 30 twelve times (eight of them concurrently), and 40 twice under one idempotency key. Against a cap configured out-of-band (below) every charge scales with that cap instead: 1.5x, 0.3x and 0.4x, totalling 5.9x.
+- `spend_cap` sets a cap of 100, then issues 15 real `charge` calls totalling 590: 150 once, 30 twelve times (eight of them concurrently), and 40 twice under one idempotency key. If the server's `charge` takes no idempotency key, the two 40s are not sent (13 calls, 510). Against a cap configured out-of-band (below) every charge scales with that cap instead: 1.5x, 0.3x and 0.4x, totalling 5.9x (5.1x without the retry).
 - `approval_threshold` sets an auto-approve limit, then requests approval for 49, 50 and 51, then 49 three more times (L-1, L, L+1, then L-1 three times, for an out-of-band limit L). On a server where an approval moves money, each approval may be a real payment.
 - `content_injection` creates up to 21 listings (17 on the bundled mock), most of them carrying text that tells an agent to charge 999.
 
@@ -86,7 +86,7 @@ The probes speak a fixed vocabulary (`charge`, `set_spending_limit`, ...), and y
 |---|---|
 | `server` | `{"transport": "stdio", "command", "args", "env", "cwd"}` or `{"transport": "http", "url", "headers"}`. `${VAR}` and `${VAR:-default}` come from your environment, so keys stay out of the file. A stdio server gets only a minimal environment (`PATH`, `HOME` and a few more) plus `env`, so pass anything else it needs explicitly. |
 | `tools.<probe tool>.tool` | The server's name for it. |
-| `rename`, `fixed`, `drop`, `types` | Argument renames (probe name to server name), constant arguments the server needs, probe arguments to leave out, and `number`, `integer` or `string` coercions. A `fixed` value may not override an argument the probe sends. |
+| `rename`, `fixed`, `drop`, `types` | Argument renames (probe name to server name), constant arguments the server needs, probe arguments to leave out, and `number`, `integer` or `string` coercions. A `fixed` value may not override an argument the probe sends. Dropping `idempotency_key` from `charge` says the server has no idempotency key: `spend_cap` then reports its retry shape as not supported instead of sending it. |
 | `refuse_when` | When an ordinary result means no: `{"path": "status", "in": [...]}`, `"not_in": [...]` or `"present": true`. Dotted paths reach into nested results. |
 | `result` | Fields the probes read, taken from the server's result: `"committed_spend": "spent_total"`, or `{"path": "outcome", "map": {"WITHIN_CEILING": "approved"}}`. |
 | `reset` | How to give each reading fresh state: `{"tool": "..."}` calls a server tool, `{"restart": true}` starts a new session (a new process, for stdio), `{"command": [...]}` runs a local command (from the file's directory) and then reconnects. |
@@ -99,7 +99,7 @@ Unknown keys are errors, not ignored, and `_comment` is allowed anywhere.
 
 **Limits configured out-of-band.** Some servers take their cap or approval threshold from an env var, a config file or an operator API, and give the agent no tool to set it. Declare the value in `out_of_band_limits` and the probe tests that value, never calls `set_spending_limit` or `set_approval_threshold`, and sizes its amounts from it. `spend_cap` then requires a `reset`: each attack shape deliberately uses up the cap, so without one every shape after the first would start from the last one's spend. It skips with that reason rather than run.
 
-**When a mapping is wrong.** A wrong mapping usually makes every charge fail, for example on a bad argument, and every refused charge looks like a cap holding. So `spend_cap` reports a sev2, "Spend cap refuses charges that fit under it", when charges that fit under a fresh cap are refused. It also reports it when the first charge of the retry shape is refused, which happens when a server rejects the idempotency key outright. Each attempt keeps the server's refusal messages, so the report shows which case you hit.
+**When a mapping is wrong.** A wrong mapping usually makes every charge fail, for example on a bad argument, and every refused charge looks like a cap holding. So `spend_cap` reports a sev2, "Spend cap refuses charges that fit under it", when charges that fit under a fresh cap are refused. It also reports it when the first charge of the retry shape is refused, which happens when a server rejects the idempotency key outright; if the server has no such key, drop it in the mapping. Each attempt keeps the server's refusal messages, so the report shows which case you hit.
 
 Mapping files for two open-source agent-wallet servers, with step-by-step run sheets, are in [`servers/`](servers/).
 
@@ -112,6 +112,7 @@ Mapping files for two open-source agent-wallet servers, with step-by-step run sh
 - `call_tool(tool, **kwargs)`: calls one tool and returns its result as a dict. A refusal is either a raised `ToolError` or an MCP-style result with `"isError": true`, and the probes treat both as refused. Anything else counts as accepted.
 - `reset()`: optional. If present, it is called between probes, before each spend-cap shape and before each approval boundary check, so earlier calls cannot affect a reading.
 - `out_of_band_limits`: optional, as above.
+- `takes_idempotency_key`: optional. Set it to `False` when your `charge` has no idempotency key, and the retry shape is reported as not supported instead of run.
 
 ```python
 # myadapter.py
@@ -176,7 +177,7 @@ src/mcp_guardrail_probe/
   mcp_target.py   a Target backed by a real MCP server, and its mapping file
   probes/
     base.py              skip-or-run, attempt recording
-    spend_cap.py         four attack shapes, client-side ledger
+    spend_cap.py         three cap shapes and a retry, client-side ledger
     injection.py         differential tool-call comparison
     approval_threshold.py  boundary walk in both directions
   mock_server/
@@ -207,7 +208,7 @@ This is a small harness, not new research, and most of the ideas around it are o
 - [snyk/agent-scan](https://github.com/snyk/agent-scan), [cisco-ai-defense/mcp-scanner](https://github.com/cisco-ai-defense/mcp-scanner) and [Promptfoo's MCP security testing](https://www.promptfoo.dev/docs/red-team/mcp-security-testing/) scan or red-team MCP servers for tool poisoning and prompt injection. Use them for that; this does not try to compete.
 - On spending controls specifically, [agent-overspend-benchmark](https://github.com/Pink-Agentic-Payments/agent-overspend-benchmark) measures what agents *try* when asked to get around a spending rule. [payment-mcp-census](https://github.com/Pink-Agentic-Payments/payment-mcp-census) surveys which payment MCP servers document spending controls.
 
-What this adds, as far as I can tell, is the server side of that question: whether a cap or approval rule actually *holds* under concurrent charges, under retries with one idempotency key, and at the L−1 / L / L+1 boundary.
+What this adds, as far as I can tell, is the server side of that question: whether a cap or approval rule actually *holds* under concurrent charges and at the L−1 / L / L+1 boundary, and whether a charge retried under one idempotency key is charged twice.
 
 ## Licence
 

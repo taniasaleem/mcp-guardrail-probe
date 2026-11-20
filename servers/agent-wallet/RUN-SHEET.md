@@ -22,6 +22,11 @@ Its cap is lifetime spend against a mandate. So before every reading,
 grants the mandate again. The mappings do this through `reset.command`. The
 amounts are integer cents.
 
+`spend_cap`'s retry shape (one charge sent twice under one idempotency key)
+does not run here. `request_payment` has no idempotency parameter, so
+`spend-cap.json` drops the probe's key, and the attempt log lists that shape
+as not supported, marked `–`. It is neither a pass nor a finding.
+
 Do the steps in order. Step 1 sends nothing outside your machine. Step 2
 issues cards in a Stripe test-mode account.
 
@@ -106,8 +111,9 @@ test mode. agent-wallet's Stripe rail itself accepts any key; the reset script
 refuses one that does not start with `sk_test_`.
 
 Without `STRIPE_ISSUING_CARDHOLDER`, the rail creates a new cardholder in each
-daemon process that settles a payment, which is up to five per probe run. To avoid that, create one
-test cardholder in the dashboard and export its id.
+daemon process that settles a payment: up to three in the `spend_cap` run and
+four in the `approval_threshold` run. To avoid that, create one test
+cardholder in the dashboard and export its id.
 
 ```bash
 export STRIPE_SECRET_KEY=sk_test_... STRIPE_ISSUING_CARDHOLDER=ich_...
@@ -136,8 +142,8 @@ bash servers/agent-wallet/reset-daemon.sh stop
 What it creates, from reading the code (not yet run): one single-use virtual
 card for each payment the policy settles. Each card's spend limit is the
 payment's amount, and it cancels itself after one authorization. No merchant
-is charged; issuing the card is the whole settlement. `spend_cap` sends 15
-requests (150; 30 four times; 30 eight times at once; 40 twice) and
+is charged; issuing the card is the whole settlement. `spend_cap` sends 13
+requests (150; 30 four times; 30 eight times at once) and
 `approval_threshold` sends 6 (99, 100, 101, then 99 three times), all in
 cents. Requests that are denied or left pending issue no card. A pending
 approval is wiped with the database at the next reset, and nobody approves it.
