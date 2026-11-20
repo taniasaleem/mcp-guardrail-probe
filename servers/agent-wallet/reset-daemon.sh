@@ -99,10 +99,16 @@ curl -sf -X POST "$control/mandates" \
   -d "{\"id\":\"probe\",\"grantedBy\":\"mcp-guardrail-probe\",\"cap\":{\"amount\":\"$cap\",\"currency\":\"USD\"},\"rails\":[\"stripe\"]}" \
   >/dev/null
 
+mcp_up=""
 for _ in $(seq 1 50); do
   if (exec 3<>"/dev/tcp/127.0.0.1/$mcp_port") 2>/dev/null; then
+    mcp_up=1
     break
   fi
   sleep 0.1
 done
+if [[ -z "$mcp_up" ]]; then
+  echo "agent-wallet daemon is not serving MCP on port $mcp_port; see $state/daemon.log" >&2
+  exit 1
+fi
 echo "agent-wallet daemon up: profile $profile, mandate cap $cap cents, state in $state" >&2
