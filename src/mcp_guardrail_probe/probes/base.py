@@ -12,7 +12,7 @@ import itertools
 from abc import ABC, abstractmethod
 from typing import Any, Iterator
 
-from ..model import Attempt, Finding, ProbeResult, Target
+from ..model import Attempt, Finding, ProbeResult, Target, ToolError
 
 
 class Probe(ABC):
@@ -44,6 +44,26 @@ class Probe(ABC):
         )
         self._attempts.append(attempt)
         return attempt
+
+    def call(self, target: Target, tool: str, **kwargs: Any) -> Any:
+        """Call a tool, treating an MCP-style in-band error as a refusal.
+
+        MCP reports a failed tool call inside the result (`isError: true`)
+        rather than as an exception. Probes count anything that is not a
+        refusal as accepted, so an adapter that passes such a result through
+        would otherwise turn a refused charge into an accepted one, and a cap
+        that held into a sev1. Every probe goes through here, never straight
+        to `target.call_tool`.
+        """
+        result = target.call_tool(tool, **kwargs)
+        if isinstance(result, dict) and result.get("isError"):
+            text = " ".join(
+                str(block.get("text", ""))
+                for block in result.get("content") or []
+                if isinstance(block, dict)
+            ).strip()
+            raise ToolError(text or f"{tool} returned isError", result)
+        return result
 
     def missing_tools(self, target: Target) -> list[str]:
         available = set(target.list_tools())

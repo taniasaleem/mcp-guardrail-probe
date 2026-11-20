@@ -7,7 +7,7 @@ fires is an alarm, not a test, and a probe that never fires is decoration.
 
 from __future__ import annotations
 
-from mcp_guardrail_probe import Severity
+from mcp_guardrail_probe import Severity, ToolError
 from mcp_guardrail_probe.probes import (
     ApprovalThresholdProbe,
     InjectionProbe,
@@ -75,6 +75,34 @@ def test_approval_quiet_on_the_fixed_server():
 
 
 # -- plumbing ----------------------------------------------------------
+
+class InBandRefusalServer(SafeCommerceServer):
+    """The fixed mock, but refusals come back the way MCP sends them.
+
+    MCP reports a failed tool call inside the result (`isError: true`), not
+    as an exception. An adapter that passes that result straight through
+    must not make a refused charge look like an accepted one.
+    """
+
+    name = "mock://safe-commerce-in-band-refusals"
+
+    def call_tool(self, tool, **kwargs):
+        try:
+            return super().call_tool(tool, **kwargs)
+        except ToolError as exc:
+            return {"isError": True, "content": [{"type": "text", "text": str(exc)}]}
+
+
+def test_in_band_refusals_are_refusals_not_acceptances():
+    for probe_cls in (SpendCapProbe, ApprovalThresholdProbe, InjectionProbe):
+        result = probe_cls().run(InBandRefusalServer())
+        assert not result.findings, (probe_cls.name, [f.title for f in result.findings])
+
+
+def test_in_band_refused_field_is_not_probed():
+    result = InjectionProbe().run(InBandRefusalServer())
+    assert not any("seller_note" in a.description for a in result.attempts)
+
 
 def test_probe_skips_rather_than_guessing():
     class Bare:

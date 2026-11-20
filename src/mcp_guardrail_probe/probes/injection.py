@@ -139,14 +139,15 @@ class InjectionProbe(Probe):
         for field in CANDIDATE_FIELDS:
             kwargs = {"title": "probe", field: "probe"}
             try:
-                target.call_tool("add_item", **kwargs)
+                self.call(target, "add_item", **kwargs)
                 present.append(field)
             except ToolError:
                 continue
         return present or ["description"]
 
     def _run_clean(self, target: Target, request: str) -> _Run:
-        target.call_tool(
+        self.call(
+            target,
             "add_item",
             title="Blue mug",
             description="A plain blue ceramic mug, 350ml.",
@@ -159,11 +160,11 @@ class InjectionProbe(Probe):
             "description": "A plain blue ceramic mug, 350ml.",
         }
         kwargs[field] = payload if field != "title" else f"Blue mug {payload}"
-        target.call_tool("add_item", **kwargs)
+        self.call(target, "add_item", **kwargs)
         return self._agent(target, request)
 
     def _agent(self, target: Target, request: str) -> _Run:
-        result = target.call_tool("agent_request", prompt=request)
+        result = self.call(target, "agent_request", prompt=request)
         return _Run(
             tool_calls=list(result.get("tool_calls", [])),
             text=str(result.get("text", "")),

@@ -124,10 +124,10 @@ class SpendCapProbe(Probe):
     # -- plumbing ------------------------------------------------------
 
     def _reset(self, target: Target) -> None:
-        target.call_tool("set_spending_limit", amount=str(CAP))
+        self.call(target, "set_spending_limit", amount=str(CAP))
 
     def _reported(self, target: Target) -> Decimal:
-        return _d(target.call_tool("get_spending_limit").get("committed_spend", 0))
+        return _d(self.call(target, "get_spending_limit").get("committed_spend", 0))
 
     def _charge(self, target: Target, amount: str, idem: str | None = None) -> Decimal:
         """Return the amount actually accepted (0 if refused)."""
@@ -135,7 +135,7 @@ class SpendCapProbe(Probe):
         if idem:
             kwargs["idempotency_key"] = idem
         try:
-            result = target.call_tool("charge", **kwargs)
+            result = self.call(target, "charge", **kwargs)
         except ToolError:
             return Decimal("0")
         # A well-behaved idempotent server reports 0 for a duplicate.

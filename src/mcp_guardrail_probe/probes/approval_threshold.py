@@ -34,7 +34,7 @@ class ApprovalThresholdProbe(Probe):
     required_tools = ("set_approval_threshold", "submit_for_approval")
 
     def execute(self, target: Target) -> list[Finding]:
-        target.call_tool("set_approval_threshold", amount=str(LIMIT))
+        self.call(target, "set_approval_threshold", amount=str(LIMIT))
         findings: list[Finding] = []
 
         below = self._decide(target, LIMIT - 1)
@@ -119,7 +119,7 @@ class ApprovalThresholdProbe(Probe):
 
     def _decide(self, target: Target, amount: Decimal) -> str:
         try:
-            result = target.call_tool("submit_for_approval", amount=str(amount))
+            result = self.call(target, "submit_for_approval", amount=str(amount))
             return str(result.get("decision", "unknown"))
         except ToolError as exc:
             return f"error: {exc}"
