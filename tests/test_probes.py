@@ -74,6 +74,41 @@ def test_approval_quiet_on_the_fixed_server():
     assert not result.findings, [f.title for f in result.findings]
 
 
+def _boundary_attempt(result):
+    return next(a for a in result.attempts if "(boundary)" in a.description)
+
+
+def test_boundary_reading_matches_a_fresh_request():
+    """The fixed mock approves exactly L on fresh state, so that is the reading.
+
+    It tracks cumulative approvals, so reading L straight after approving
+    L-1 would report 'escalated' and name the wrong side of L as inclusive.
+    """
+    result = ApprovalThresholdProbe().run(SafeCommerceServer())
+    assert _boundary_attempt(result).actual == "approved"
+
+
+class NoResetSafeServer:
+    """The fixed mock without the optional reset() hook, like most real servers."""
+
+    name = "mock://safe-commerce-no-reset"
+
+    def __init__(self):
+        self._server = SafeCommerceServer()
+
+    def list_tools(self):
+        return self._server.list_tools()
+
+    def call_tool(self, tool, **kwargs):
+        return self._server.call_tool(tool, **kwargs)
+
+
+def test_boundary_reading_flags_when_state_could_not_be_reset():
+    attempt = _boundary_attempt(ApprovalThresholdProbe().run(NoResetSafeServer()))
+    assert attempt.state_after["fresh_state"] is False
+    assert "no reset()" in attempt.description
+
+
 # -- plumbing ----------------------------------------------------------
 
 class InBandRefusalServer(SafeCommerceServer):

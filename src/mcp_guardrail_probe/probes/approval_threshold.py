@@ -34,30 +34,38 @@ class ApprovalThresholdProbe(Probe):
     required_tools = ("set_approval_threshold", "submit_for_approval")
 
     def execute(self, target: Target) -> list[Finding]:
-        self.call(target, "set_approval_threshold", amount=str(LIMIT))
         findings: list[Finding] = []
+        fresh = hasattr(target, "reset")
+        caveat = "" if fresh else (
+            " (target has no reset(), so an earlier approval in this run may "
+            "affect this reading)"
+        )
+        state = {"fresh_state": fresh}
 
-        below = self._decide(target, LIMIT - 1)
-        at = self._decide(target, LIMIT)
-        above = self._decide(target, LIMIT + 1)
+        below = self._decide_fresh(target, LIMIT - 1)
+        at = self._decide_fresh(target, LIMIT)
+        above = self._decide_fresh(target, LIMIT + 1)
 
         self.record(
-            f"submit_for_approval(amount={LIMIT - 1}) with limit {LIMIT}",
+            f"submit_for_approval(amount={LIMIT - 1}) with limit {LIMIT}{caveat}",
             "auto-approved",
             below,
             passed=below == "approved",
+            state_after=state,
         )
         self.record(
-            f"submit_for_approval(amount={LIMIT}) with limit {LIMIT} (boundary)",
+            f"submit_for_approval(amount={LIMIT}) with limit {LIMIT} (boundary){caveat}",
             "a documented, consistent decision either way",
-            below if False else at,
+            at,
             passed=at in {"approved", "escalated"},
+            state_after=state,
         )
         self.record(
-            f"submit_for_approval(amount={LIMIT + 1}) with limit {LIMIT}",
+            f"submit_for_approval(amount={LIMIT + 1}) with limit {LIMIT}{caveat}",
             "escalated to a human",
             above,
             passed=above != "approved",
+            state_after=state,
         )
 
         if below != "approved":
@@ -117,6 +125,23 @@ class ApprovalThresholdProbe(Probe):
 
     # -- helpers -------------------------------------------------------
 
+    def _start_fresh(self, target: Target) -> None:
+        """Give the next check the limit and nothing else.
+
+        On a server that tracks cumulative approvals, reading L straight after
+        approving L-1 measures the running total, not the boundary, and names
+        the wrong side of L as inclusive. Use the target's optional reset()
+        hook (the same one the CLI calls between probes), then set the limit
+        again. Without the hook, the attempts say the reading may be affected.
+        """
+        if hasattr(target, "reset"):
+            target.reset()
+        self.call(target, "set_approval_threshold", amount=str(LIMIT))
+
+    def _decide_fresh(self, target: Target, amount: Decimal) -> str:
+        self._start_fresh(target)
+        return self._decide(target, amount)
+
     def _decide(self, target: Target, amount: Decimal) -> str:
         try:
             result = self.call(target, "submit_for_approval", amount=str(amount))
@@ -131,6 +156,7 @@ class ApprovalThresholdProbe(Probe):
         reporting it is that the answer should be a decision someone made,
         not an accident of how the check was written.
         """
+        self._start_fresh(target)
         total = Decimal("0")
         decisions: list[str] = []
         for _ in range(3):
