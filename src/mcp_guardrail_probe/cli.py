@@ -3,6 +3,7 @@
     mcp-guardrail-probe --demo
     mcp-guardrail-probe --demo-safe
     mcp-guardrail-probe --target mymodule:build_target --format json
+    mcp-guardrail-probe --mcp-config servers/my-server.json
 
 Exit codes are chosen so CI can gate on them: 0 clean, 1 sev1 present,
 2 only sev2/sev3, 3 nothing was tested (every probe skipped). A build
@@ -48,6 +49,18 @@ def load_target(spec: str) -> Target:
     return target
 
 
+def load_mcp_target(path: str) -> Target:
+    """Connect to a real MCP server described by a JSON mapping file."""
+    from .mcp_target import ConfigError, McpTarget, McpTargetError
+
+    try:
+        return McpTarget.from_file(path)
+    except ConfigError as exc:
+        raise SystemExit(f"{path}: {exc}") from None
+    except McpTargetError as exc:
+        raise SystemExit(f"{path}: {exc}") from None
+
+
 def run(target: Target, probe_names: list[str]) -> list[ProbeResult]:
     results: list[ProbeResult] = []
     for name in probe_names:
@@ -56,7 +69,7 @@ def run(target: Target, probe_names: list[str]) -> list[ProbeResult]:
             raise SystemExit(
                 f"unknown probe {name!r}; available: {', '.join(ALL_PROBES)}"
             )
-        if hasattr(target, "reset"):
+        if callable(getattr(target, "reset", None)):
             target.reset()  # type: ignore[attr-defined]
         results.append(probe_cls().run(target))
     return results
@@ -73,6 +86,14 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "module:callable returning a Target. The probes make real tool "
             "calls, including charges: point this only at a sandbox you own"
+        ),
+    )
+    source.add_argument(
+        "--mcp-config",
+        metavar="FILE",
+        help=(
+            "JSON file describing a real MCP server and how its tools map onto "
+            "the probes' (needs the [mcp] extra). Same warning as --target"
         ),
     )
     source.add_argument(
@@ -96,10 +117,17 @@ def main(argv: list[str] | None = None) -> int:
         from .mock_server import SafeCommerceServer, VulnerableCommerceServer
 
         target: Any = SafeCommerceServer() if args.demo_safe else VulnerableCommerceServer()
+    elif args.mcp_config:
+        target = load_mcp_target(args.mcp_config)
     else:
         target = load_target(args.target)
 
-    results = run(target, args.probes or list(ALL_PROBES))
+    try:
+        results = run(target, args.probes or list(ALL_PROBES))
+    finally:
+        close = getattr(target, "close", None)
+        if callable(close):
+            close()
     rendered = to_json(results) if args.format == "json" else to_markdown(results)
 
     if args.out:

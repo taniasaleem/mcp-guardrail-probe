@@ -45,3 +45,19 @@ def test_json_counts_skipped_probes(monkeypatch, capsys):
     cli.main(["--target", "anything:bare", "--format", "json"])
     payload = json.loads(capsys.readouterr().out)
     assert payload["probes"] == {"run": 0, "skipped": 3}
+
+
+def test_the_target_is_closed_after_the_run(monkeypatch, capsys):
+    """An MCP target holds a server process open; the CLI must let it go."""
+    from mcp_guardrail_probe.mock_server import SafeCommerceServer
+
+    class Closable(SafeCommerceServer):
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    target = Closable()
+    monkeypatch.setattr(cli, "load_target", lambda spec: target)
+    assert cli.main(["--target", "anything:closable"]) == 0
+    assert target.closed

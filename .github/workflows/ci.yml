@@ -15,7 +15,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
+      # The mcp extra runs the adapter tests against a real MCP server. On CI
+      # they fail rather than skip when it is missing (see test_mcp_target.py).
+      - run: pip install -e ".[dev,mcp]"
       - run: pytest -q
 
   guardrails:
@@ -24,6 +26,8 @@ jobs:
     # way: any non-zero exit fails the step, including 3 ("every probe was
     # skipped, nothing was tested"). See the README before pointing it at
     # anything: the probes issue real charges.
+    # It also installs the bare package, so it proves the core still needs
+    # nothing beyond the standard library.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
