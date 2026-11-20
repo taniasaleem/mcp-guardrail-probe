@@ -1,0 +1,131 @@
+{
+  "_comment": "almega-mcp (github.com/almega-ai/almega-mcp), the wallet server (almega_mcp.py, console script almega-wallet) on its in-memory backend: no Stripe, nothing leaves the process. ALMEGA_VENV is a virtualenv with almega installed and mcp<2 (almega imports mcp.server.fastmcp, which mcp 2.x removed). Amounts are dollars as floats; the probe's 150, 30, 40 and 49/50/51 are sent as numbers.",
+  "name": "almega-wallet, memory backend",
+  "server": {
+    "transport": "stdio",
+    "command": "${ALMEGA_VENV}/bin/almega-wallet",
+    "env": {
+      "ALMEGA_BACKEND": "memory",
+      "FASTMCP_LOG_LEVEL": "WARNING"
+    }
+  },
+  "timeout_seconds": 60,
+  "reset": {
+    "_comment": "almega's own reset tool: forgets every wallet and transaction (on the Stripe backend, the local index only).",
+    "tool": "reset"
+  },
+  "tools": {
+    "set_spending_limit": {
+      "_comment": "A wallet whose monthly limit is the probe's cap. approve_above is set far above every probe charge, so only the limit decides.",
+      "tool": "open_wallet",
+      "rename": {
+        "amount": "monthly_limit"
+      },
+      "types": {
+        "monthly_limit": "number"
+      },
+      "fixed": {
+        "agent_id": "probe",
+        "allow": [
+          "probe"
+        ],
+        "approve_above": 1000000
+      },
+      "refuse_when": [
+        {
+          "path": "error",
+          "present": true
+        }
+      ]
+    },
+    "get_spending_limit": {
+      "tool": "get_wallet",
+      "fixed": {
+        "agent_id": "probe"
+      },
+      "refuse_when": [
+        {
+          "path": "error",
+          "present": true
+        }
+      ],
+      "result": {
+        "committed_spend": "spent_this_month"
+      }
+    },
+    "charge": {
+      "_comment": "pay returns an ordinary transaction record either way; only status APPROVED moved spend. pay has no idempotency parameter; the probe's idempotency_key is sent and FastMCP ignores unknown arguments.",
+      "tool": "pay",
+      "types": {
+        "amount": "number"
+      },
+      "fixed": {
+        "agent_id": "probe",
+        "merchant": "mcp-guardrail-probe-merchant",
+        "category": "probe"
+      },
+      "refuse_when": [
+        {
+          "path": "error",
+          "present": true
+        },
+        {
+          "path": "status",
+          "not_in": [
+            "APPROVED"
+          ]
+        }
+      ]
+    },
+    "set_approval_threshold": {
+      "_comment": "A wallet whose approve_above is the probe's limit, with a monthly limit far above every probe request, so only the approval rule decides.",
+      "tool": "open_wallet",
+      "rename": {
+        "amount": "approve_above"
+      },
+      "types": {
+        "approve_above": "number"
+      },
+      "fixed": {
+        "agent_id": "probe",
+        "allow": [
+          "probe"
+        ],
+        "monthly_limit": 1000000
+      },
+      "refuse_when": [
+        {
+          "path": "error",
+          "present": true
+        }
+      ]
+    },
+    "submit_for_approval": {
+      "tool": "pay",
+      "types": {
+        "amount": "number"
+      },
+      "fixed": {
+        "agent_id": "probe",
+        "merchant": "mcp-guardrail-probe-merchant",
+        "category": "probe"
+      },
+      "refuse_when": [
+        {
+          "path": "error",
+          "present": true
+        }
+      ],
+      "result": {
+        "decision": {
+          "path": "status",
+          "map": {
+            "APPROVED": "approved",
+            "AWAITING_YOU": "escalated",
+            "BLOCKED": "blocked"
+          }
+        }
+      }
+    }
+  }
+}

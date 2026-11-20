@@ -1,0 +1,39 @@
+{
+  "_comment": "agent-wallet (github.com/DaveForan/agent-wallet), its daemon over streamable HTTP. The cap is a mandate's lifetime cap, set by the operator through the control API, so it is out-of-band: reset-daemon.sh grants mandate 'probe' a cap of 100 cents on a fresh database before every reading. Amounts are integer cents as strings, which is what the probe sends at a cap of 100 (150, 30, 40). There is no agent-callable read-back of spend against a mandate, so the counter cross-check does not run. request_payment has no idempotency parameter; the probe's idempotency_key is sent and the server's schema drops it.",
+  "name": "agent-wallet daemon, Stripe test mode, mandate cap 100 cents",
+  "server": {
+    "transport": "http",
+    "url": "http://127.0.0.1:${AGENT_WALLET_MCP_PORT:-4024}/mcp"
+  },
+  "timeout_seconds": 60,
+  "reset": {
+    "command": [
+      "bash",
+      "reset-daemon.sh",
+      "spend-cap"
+    ]
+  },
+  "out_of_band_limits": {
+    "spending_limit": "100"
+  },
+  "tools": {
+    "charge": {
+      "tool": "request_payment",
+      "fixed": {
+        "rail": "stripe",
+        "currency": "USD",
+        "payeeAddress": "mcp-guardrail-probe-merchant",
+        "mandateId": "probe",
+        "memo": "mcp-guardrail-probe spend_cap"
+      },
+      "refuse_when": [
+        {
+          "path": "result.status",
+          "not_in": [
+            "settled"
+          ]
+        }
+      ]
+    }
+  }
+}

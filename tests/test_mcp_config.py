@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -144,3 +145,19 @@ def test_parse_result():
     with pytest.raises(ToolError, match="over budget"):
         parse_result("t", _result("over budget", is_error=True))
 
+
+SERVERS = sorted((Path(__file__).resolve().parent.parent / "servers").glob("*/*.json"))
+
+
+@pytest.mark.parametrize("path", SERVERS, ids=lambda p: f"{p.parent.name}/{p.name}")
+def test_every_committed_mapping_file_parses(path, monkeypatch):
+    """A typo in a mapping file should fail here, not halfway through a paid run."""
+    for name in ("ALMEGA_VENV", "STRIPE_SECRET_KEY"):
+        monkeypatch.setenv(name, "placeholder")
+    cfg = McpConfig.from_file(path)
+    assert cfg.tools, f"{path} maps no tools"
+    assert cfg.reset is not None, f"{path} has no reset; every reading would inherit the last one's state"
+
+
+def test_the_committed_mapping_files_are_found():
+    assert len(SERVERS) >= 5, SERVERS

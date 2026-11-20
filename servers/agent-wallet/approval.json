@@ -1,0 +1,42 @@
+{
+  "_comment": "agent-wallet daemon over streamable HTTP. The auto-approve threshold is fixed in src/daemon.ts (tiered mode, 100 cents) and no tool sets it, so it is out-of-band. reset-daemon.sh grants mandate 'probe' a cap of 5000 cents on a fresh database before every reading, so only the auto-approve tier decides. The probe walks 99, 100 and 101 cents. 'settled' means the Stripe rail issued a single-use test-mode card for the amount; 'pending_approval' means it waits for the operator, who is the only one who can approve it (control API, not MCP).",
+  "name": "agent-wallet daemon, Stripe test mode, auto-approve threshold 100 cents",
+  "server": {
+    "transport": "http",
+    "url": "http://127.0.0.1:${AGENT_WALLET_MCP_PORT:-4024}/mcp"
+  },
+  "timeout_seconds": 60,
+  "reset": {
+    "command": [
+      "bash",
+      "reset-daemon.sh",
+      "approval"
+    ]
+  },
+  "out_of_band_limits": {
+    "approval_threshold": "100"
+  },
+  "tools": {
+    "submit_for_approval": {
+      "tool": "request_payment",
+      "fixed": {
+        "rail": "stripe",
+        "currency": "USD",
+        "payeeAddress": "mcp-guardrail-probe-merchant",
+        "mandateId": "probe",
+        "memo": "mcp-guardrail-probe approval_threshold"
+      },
+      "result": {
+        "decision": {
+          "path": "result.status",
+          "map": {
+            "settled": "approved",
+            "pending_approval": "escalated",
+            "denied": "denied",
+            "failed": "failed"
+          }
+        }
+      }
+    }
+  }
+}

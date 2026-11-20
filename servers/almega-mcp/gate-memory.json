@@ -1,0 +1,109 @@
+{
+  "_comment": "almega-mcp's gate server (almega_gate.py, console script almega-mcp, the entry the MCP Registry lists). In-memory only; it has no Stripe backend. A frame's payment sub-frame carries monthly_limit and approve_above. ALMEGA_VENV as for the wallet files.",
+  "name": "almega-mcp gate, in memory",
+  "server": {
+    "transport": "stdio",
+    "command": "${ALMEGA_VENV}/bin/almega-mcp",
+    "env": {
+      "FASTMCP_LOG_LEVEL": "WARNING"
+    }
+  },
+  "timeout_seconds": 60,
+  "reset": {
+    "tool": "reset"
+  },
+  "tools": {
+    "set_spending_limit": {
+      "tool": "set_frame",
+      "rename": {
+        "amount": "monthly_limit"
+      },
+      "types": {
+        "monthly_limit": "number"
+      },
+      "fixed": {
+        "agent_id": "probe",
+        "approve_above": 1000000
+      }
+    },
+    "get_spending_limit": {
+      "tool": "get_frame",
+      "fixed": {
+        "agent_id": "probe"
+      },
+      "refuse_when": [
+        {
+          "path": "error",
+          "present": true
+        }
+      ],
+      "result": {
+        "committed_spend": "spent"
+      }
+    },
+    "charge": {
+      "_comment": "pay is sugar over request(kind='payment'); only decision ALLOWED moved spend. No idempotency parameter; the probe's key is ignored.",
+      "tool": "pay",
+      "types": {
+        "amount": "number"
+      },
+      "fixed": {
+        "agent_id": "probe",
+        "merchant": "mcp-guardrail-probe-merchant",
+        "category": "probe"
+      },
+      "refuse_when": [
+        {
+          "path": "error",
+          "present": true
+        },
+        {
+          "path": "decision",
+          "not_in": [
+            "ALLOWED"
+          ]
+        }
+      ]
+    },
+    "set_approval_threshold": {
+      "tool": "set_frame",
+      "rename": {
+        "amount": "approve_above"
+      },
+      "types": {
+        "approve_above": "number"
+      },
+      "fixed": {
+        "agent_id": "probe",
+        "monthly_limit": 1000000
+      }
+    },
+    "submit_for_approval": {
+      "tool": "pay",
+      "types": {
+        "amount": "number"
+      },
+      "fixed": {
+        "agent_id": "probe",
+        "merchant": "mcp-guardrail-probe-merchant",
+        "category": "probe"
+      },
+      "refuse_when": [
+        {
+          "path": "error",
+          "present": true
+        }
+      ],
+      "result": {
+        "decision": {
+          "path": "decision",
+          "map": {
+            "ALLOWED": "approved",
+            "AWAITING_YOU": "escalated",
+            "BLOCKED": "blocked"
+          }
+        }
+      }
+    }
+  }
+}
