@@ -378,6 +378,12 @@ class McpConfig:
                 raise ConfigError(f"out_of_band_limits.{key}: {value!r} is not a number") from None
             if limits[key] <= 0:
                 raise ConfigError(f"out_of_band_limits.{key} must be positive")
+        if limits.get("approval_threshold", 2) <= 1:
+            # approval_threshold tests L-1; the probe would skip at run time.
+            raise ConfigError(
+                "out_of_band_limits.approval_threshold must be above 1: the probe "
+                "tests L-1, L and L+1, and L-1 must be an amount above zero"
+            )
 
         tools_raw = raw.get("tools", {})
         if not isinstance(tools_raw, dict):

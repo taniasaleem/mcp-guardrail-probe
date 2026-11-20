@@ -87,6 +87,14 @@ def test_out_of_band_limits_are_decimals_and_known_keys():
         _cfg(out_of_band_limits={"spend_cap": "100"})
 
 
+def test_an_out_of_band_approval_threshold_must_be_above_1():
+    for too_small in ("1", "0.5"):
+        with pytest.raises(ConfigError, match="approval_threshold must be above 1"):
+            _cfg(out_of_band_limits={"approval_threshold": too_small})
+    assert _cfg(out_of_band_limits={"approval_threshold": "2"}).out_of_band_limits
+    assert _cfg(out_of_band_limits={"spending_limit": "1"}).out_of_band_limits  # x0.3 is fine
+
+
 def test_arguments_are_renamed_fixed_dropped_and_typed():
     mapping = ToolMapping.parse(
         "charge",

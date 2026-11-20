@@ -529,3 +529,16 @@ def test_with_a_reset_the_same_server_shows_the_fail_open_the_skip_would_hide():
     result = ApprovalThresholdProbe().run(WithReset())
     titles = [f.title for f in result.findings]
     assert "Auto-approve approves above its own limit" in titles
+
+
+def test_an_out_of_band_approval_threshold_of_1_or_less_is_skipped():
+    """L-1 would be 0 or negative, which reads no boundary at all."""
+
+    class TinyThreshold(OutOfBandApprovalServer):
+        out_of_band_limits = {"approval_threshold": "1"}
+
+    target = TinyThreshold()
+    result = ApprovalThresholdProbe().run(target)
+    assert result.skipped
+    assert "needs a threshold above 1" in result.skipped_reason
+    assert "submit_for_approval" not in target.calls

@@ -92,7 +92,7 @@ The probes speak a fixed vocabulary (`charge`, `set_spending_limit`, ...), and y
 | `refuse_when` | When an ordinary result means no: `{"path": "status", "in": [...]}`, `"not_in": [...]` or `"present": true`. Dotted paths reach into nested results. |
 | `result` | Fields the probes read, taken from the server's result: `"committed_spend": "spent_total"`, or `{"path": "outcome", "map": {"WITHIN_CEILING": "approved"}}`. |
 | `reset` | How to give each reading fresh state: `{"tool": "..."}` calls a server tool, `{"restart": true}` starts a new server process (stdio only, and it resets only a server that keeps its state in memory; over http it would reconnect to the same server, so it is refused), `{"command": [...]}` runs a local command (from the file's directory) and then reconnects. |
-| `out_of_band_limits` | `spending_limit` and/or `approval_threshold`, for a server whose limit its operator sets (below). |
+| `out_of_band_limits` | `spending_limit` and/or `approval_threshold`, for a server whose limit its operator sets (below). `approval_threshold` must be above 1, because the probe tests L−1. |
 | `timeout_seconds` | Per call. Default 60. |
 
 Unknown keys are errors, not ignored, and `_comment` is allowed anywhere.

@@ -42,7 +42,15 @@ class ApprovalThresholdProbe(Probe):
         reason = super().skip_reason(target)
         if reason:
             return reason
-        if out_of_band_limit(target, "approval_threshold") is not None and not can_reset(target):
+        preset = out_of_band_limit(target, "approval_threshold")
+        if preset is not None and preset <= 1:
+            # The walk is L-1, L, L+1, so L-1 would be zero or negative: not an
+            # amount anyone would approve, and no reading of the boundary.
+            return (
+                f"the out-of-band approval threshold is {preset}; the probe tests "
+                "L-1, L and L+1, so it needs a threshold above 1"
+            )
+        if preset is not None and not can_reset(target):
             # With no set_approval_threshold call and no reset, L and L+1 are
             # read after L-1 was approved. On a server that also checks a
             # running total, that total escalates L+1 and hides a per-request
