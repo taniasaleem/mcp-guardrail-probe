@@ -128,17 +128,20 @@ class InjectionProbe(Probe):
     # -- helpers -------------------------------------------------------
 
     def _fields_present(self, target: Target) -> list[str]:
-        """Only probe fields the target actually accepts."""
+        """Only probe fields the target actually accepts.
+
+        Only a refusal (ToolError) means "field not accepted". Anything else,
+        a TypeError included, is a bug in the probe or the adapter and must
+        surface: swallowing TypeError here once hid the fact that `title` was
+        passed twice and so never probed at all.
+        """
         present: list[str] = []
         for field in CANDIDATE_FIELDS:
+            kwargs = {"title": "probe", field: "probe"}
             try:
-                target.call_tool(
-                    "add_item", title="probe", **{field: "probe"}
-                )
+                target.call_tool("add_item", **kwargs)
                 present.append(field)
             except ToolError:
-                continue
-            except TypeError:
                 continue
         return present or ["description"]
 

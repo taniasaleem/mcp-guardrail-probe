@@ -54,6 +54,13 @@ def test_injection_skips_fields_the_target_rejects():
     assert "seller_note" not in probed
 
 
+def test_injection_probes_the_title_field():
+    """The title is the most visible injection surface and the mock obeys it."""
+    result = InjectionProbe().run(VulnerableCommerceServer())
+    probed = {f.metric["field"] for f in result.findings}
+    assert "title" in probed, probed
+
+
 # -- approval threshold ------------------------------------------------
 
 def test_approval_catches_fail_closed():
