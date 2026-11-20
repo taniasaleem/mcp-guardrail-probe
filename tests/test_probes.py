@@ -488,3 +488,44 @@ def test_a_retry_shape_that_tested_nothing_is_reported_not_passed():
     assert finding.metric["retry_first_accepted"] == "0"
     assert finding.metric["accepted_total"] == finding.metric["expected_total"] == "90"
     assert "idempotency key was refused" in finding.summary
+
+
+class RunningTotalFailOpenServer:
+    """Approves L+1 per request (fail-open), and also caps a running total.
+
+    No reset(), and the threshold is the operator's. Read in sequence, L-1 and
+    L use up the running total and it escalates L+1, which hides the
+    per-request fail-open. That is the masking the out-of-band skip prevents.
+    """
+
+    name = "mock://running-total-fail-open-no-reset"
+    out_of_band_limits = {"approval_threshold": "50"}
+
+    def __init__(self):
+        self.approved = Decimal("0")
+
+    def list_tools(self):
+        return ["submit_for_approval"]
+
+    def call_tool(self, tool, **kwargs):
+        amount, limit = Decimal(kwargs["amount"]), Decimal("50")
+        if amount > limit + 1 or self.approved + amount > limit * 2:
+            return {"decision": "escalated"}
+        self.approved += amount
+        return {"decision": "approved"}
+
+
+def test_out_of_band_approval_threshold_without_reset_is_skipped_not_guessed():
+    result = ApprovalThresholdProbe().run(RunningTotalFailOpenServer())
+    assert result.skipped
+    assert "out-of-band" in result.skipped_reason
+
+
+def test_with_a_reset_the_same_server_shows_the_fail_open_the_skip_would_hide():
+    class WithReset(RunningTotalFailOpenServer):
+        def reset(self):
+            self.approved = Decimal("0")
+
+    result = ApprovalThresholdProbe().run(WithReset())
+    titles = [f.title for f in result.findings]
+    assert "Auto-approve approves above its own limit" in titles

@@ -38,6 +38,21 @@ class ApprovalThresholdProbe(Probe):
             return ("submit_for_approval",)
         return self.required_tools
 
+    def skip_reason(self, target: Target) -> str | None:
+        reason = super().skip_reason(target)
+        if reason:
+            return reason
+        if out_of_band_limit(target, "approval_threshold") is not None and not can_reset(target):
+            # With no set_approval_threshold call and no reset, L and L+1 are
+            # read after L-1 was approved. On a server that also checks a
+            # running total, that total escalates L+1 and hides a per-request
+            # rule that would have approved it.
+            return (
+                "the approval threshold is configured out-of-band and the target has "
+                "no reset(), so each boundary check would inherit the approvals before it"
+            )
+        return None
+
     def execute(self, target: Target) -> list[Finding]:
         preset = out_of_band_limit(target, "approval_threshold")
         self.limit = preset if preset is not None else DEFAULT_LIMIT
@@ -141,7 +156,9 @@ class ApprovalThresholdProbe(Probe):
         the wrong side of L as inclusive. Use the target's optional reset()
         hook (the same one the CLI calls between probes), then set the limit
         again (unless the limit is configured out-of-band). Without the hook,
-        the attempts say the reading may be affected.
+        the in-band path relies on set_approval_threshold restarting the count
+        and the attempts say the reading may be affected; the out-of-band path
+        never gets here without one (see skip_reason).
         """
         if can_reset(target):
             target.reset()  # type: ignore[attr-defined]
