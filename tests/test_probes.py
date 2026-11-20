@@ -192,10 +192,6 @@ def test_approval_catches_the_split_payment_bypass():
     assert finding.metric["auto_approved_total"] == "147"
 
 
-def _boundary_attempt(result):
-    return next(a for a in result.attempts if "(boundary)" in a.description)
-
-
 def test_boundary_reading_matches_a_fresh_request():
     """The fixed mock approves exactly L on fresh state, so that is the reading.
 
@@ -203,7 +199,7 @@ def test_boundary_reading_matches_a_fresh_request():
     L-1 would report 'escalated' and name the wrong side of L as inclusive.
     """
     result = ApprovalThresholdProbe().run(SafeCommerceServer())
-    assert _boundary_attempt(result).actual == "approved"
+    assert _attempt(result, "(boundary)").actual == "approved"
 
 
 class NoResetSafeServer:
@@ -222,7 +218,7 @@ class NoResetSafeServer:
 
 
 def test_boundary_reading_flags_when_state_could_not_be_reset():
-    attempt = _boundary_attempt(ApprovalThresholdProbe().run(NoResetSafeServer()))
+    attempt = _attempt(ApprovalThresholdProbe().run(NoResetSafeServer()), "(boundary)")
     assert attempt.state_after["fresh_state"] is False
     assert "no reset()" in attempt.description
 
