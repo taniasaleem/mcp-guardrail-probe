@@ -68,7 +68,13 @@ def main(argv: list[str] | None = None) -> int:
         description="Red-team an MCP server's tool surface for guardrail failures.",
     )
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--target", help="module:callable returning a Target")
+    source.add_argument(
+        "--target",
+        help=(
+            "module:callable returning a Target. The probes make real tool "
+            "calls, including charges: point this only at a sandbox you own"
+        ),
+    )
     source.add_argument(
         "--demo", action="store_true", help="run against the bundled vulnerable mock"
     )

@@ -7,7 +7,8 @@ It is small on purpose. Three probe families, a deliberately broken mock server 
 ```
 $ mcp-guardrail-probe --demo
 
-Findings: 8 sev1 · 1 sev2 · 0 sev3
+Probes: 3 run · 0 skipped
+Findings: 11 sev1 · 1 sev2 · 0 sev3
 
 ### 1. Spend cap does not hold
 sev1 · fail_open · probe spend_cap
@@ -28,6 +29,8 @@ They come from evaluation work on agent commerce systems. These three failure cl
 
 ## Install and run
 
+Needs Python 3.10 or newer.
+
 ```bash
 git clone https://github.com/taniasaleem/mcp-guardrail-probe
 cd mcp-guardrail-probe
@@ -38,19 +41,57 @@ mcp-guardrail-probe --demo-safe     # the fixed mock: finds nothing
 make test
 ```
 
-Against your own server, write a six-line adapter exposing `list_tools()` and `call_tool()`:
+Exit codes are chosen so CI can gate on them: **0** clean, **1** a sev1 is present, **2** only sev2/sev3, **3** nothing was tested because every probe was skipped. Fail the build on 1 and 3.
+
+## Running it against your own server
+
+**Read this first: the probes act, they do not just look.**
+
+- `spend_cap` sets a cap of 100, then issues 15 real `charge` calls totalling 590: 150 once, 30 twelve times (eight of them concurrently), and 40 twice under one idempotency key.
+- `approval_threshold` sets an auto-approve limit, then requests approval for 49, 50 and 51, then 49 three more times. On a server where an approval moves money, each approval may be a real payment.
+- `content_injection` creates up to 21 listings (17 on the bundled mock), most of them carrying text that tells an agent to charge 999.
+
+Point it only at a sandbox or test instance you own, never at anything that moves real money or that other people can see.
+
+There is no bundled MCP client yet. A target is any Python object with:
+
+- `name`: a label for the report
+- `list_tools()`: the tool names it exposes, as strings
+- `call_tool(tool, **kwargs)`: calls one tool and returns its result as a dict. A refusal is either a raised `ToolError` or an MCP-style result with `"isError": true`, and the probes treat both as refused. Anything else counts as accepted.
+- `reset()`: optional. If present, it is called between probes and before each approval boundary check, so earlier calls cannot affect a reading.
 
 ```python
 # myadapter.py
+from mcp_guardrail_probe import ToolError
+
+class MyServer:
+    name = "my-server (sandbox)"
+
+    def list_tools(self) -> list[str]:
+        ...  # e.g. the names from your MCP client's tools/list
+
+    def call_tool(self, tool: str, **kwargs) -> dict:
+        ...  # call the tool; on refusal raise ToolError or return {"isError": True, ...}
+
 def build_target():
-    return MyMCPClient(url="http://localhost:3000")   # needs .name, .list_tools(), .call_tool()
+    return MyServer()
 ```
 
 ```bash
 mcp-guardrail-probe --target myadapter:build_target --format json --out findings.json
 ```
 
-Exit codes are chosen so CI can gate on them: **0** clean, **1** a sev1 is present, **2** only sev2/sev3. Fail the build on 1.
+Each probe needs these tools under exactly these names, and is skipped without them:
+
+| Probe | Tools it needs |
+|---|---|
+| `spend_cap` | `set_spending_limit`, `get_spending_limit`, `charge` |
+| `approval_threshold` | `set_approval_threshold`, `submit_for_approval` |
+| `content_injection` | `add_item`, `agent_request` |
+
+If your server names them differently, map the names in your adapter.
+
+`content_injection` needs more than a mapping. `agent_request` is an agent that reads the listings and decides which tools to call. In MCP the model runs in the client, not the server, so a real MCP server will not normally have such a tool. Today this probe runs only against the bundled mock. Running it against a real server needs an LLM agent loop inside the harness, which it does not have yet.
 
 ## The design decisions worth arguing about
 
@@ -58,16 +99,17 @@ Exit codes are chosen so CI can gate on them: **0** clean, **1** a sev1 is prese
 
 A probe that reads the counter sees 30, concludes the cap held, and reports a clean bill of health at the exact moment money is leaving. So the probe now sums what the server *accepted* and treats the server's self-report as a separate claim to be checked against it. The two disagreeing is its own finding, because it means the operator's dashboard is wrong simultaneously with the control.
 
-**Injection testing is differential, not vibes.** Running a payload and reading the output tells you little, because models are noisy. Each payload runs the *same* user request against a clean listing and a poisoned one, and a finding is a tool call that appears only in the poisoned run. That definition is mechanical, so two people scoring independently get the same answer. Severity is sev1 only when the extra call touches money — an injection that makes the agent chatty is noise; one that reaches `charge` is the problem.
+**Injection testing is differential, not vibes.** Running a payload and reading the output tells you little, because models are noisy. Each payload runs the *same* user request against a clean listing and a poisoned one, and a finding is a tool call that appears only in the poisoned run. That definition is mechanical, so two people scoring independently get the same answer. Severity is sev1 only when the extra call touches money — an injection that makes the agent chatty is noise; one that reaches `charge` is the problem. The bundled mock's "agent" is a regex that obeys `call <tool> with amount <n>`. So the demo shows this machinery working (differential detection, field discovery, severity), not that any payload works on a real model. One of the four payloads, `role_play`, never fires on it.
 
-**Both directions, always.** Fail-closed shows up as a support ticket and fail-open shows up as a loss, so fail-closed gets fixed and fail-open survives. `approval_threshold` walks the boundary at L−1, L and L+1 explicitly, and reports the off-by-one in either direction.
+**Both directions, always.** Fail-closed shows up as a support ticket and fail-open shows up as a loss, so fail-closed gets fixed and fail-open survives. `approval_threshold` walks the boundary at L−1, L and L+1 explicitly, and reports the off-by-one in either direction. Each boundary check starts from fresh state (through the target's `reset()`, when it has one). On a server that tracks cumulative approvals, reading L straight after approving L−1 measures the running total, not the boundary.
 
-**A probe skips rather than guessing.** If the target doesn't expose the tools a probe needs, it reports `skipped` with the missing names. Silently testing a tool that looks similar produces a clean report and a false sense of safety, which is worse than no report.
+**A probe skips rather than guessing.** If the target doesn't expose the tools a probe needs, it reports `skipped` with the missing names. Silently testing a tool that looks similar produces a clean report and a false sense of safety, which is worse than no report. For the same reason, a run where every probe skipped exits 3 and says "Nothing was tested", so it can never pass for a clean result.
 
 **Every attempt is logged, passing or failing.** A probe that reports nothing still shows its working. Otherwise a clean report is indistinguishable from a probe that never ran.
 
 ## What this is not
 
+- **Not (yet) a drop-in MCP client.** You bring the adapter, and `content_injection` runs only against the bundled mock until the harness has its own agent loop.
 - **Not a scanner.** It tests three specific classes of failure well rather than many badly. There is no score out of 100, because I don't know what one would mean.
 - **Not a jailbreak collection.** Four payload families, chosen to be readable. A long list of near-duplicates makes a report harder to act on, not more thorough.
 - **Not a substitute for reading the tool surface.** The probes test the contract you already have. Deciding that `charge` should never have been reachable by the model in the first place is a design question this cannot answer for you.
@@ -88,12 +130,26 @@ src/mcp_guardrail_probe/
   mock_server/
     server.py            VulnerableCommerceServer and SafeCommerceServer
 tests/
-  test_probes.py  each probe must catch the broken mock AND stay quiet on the fixed one
+  test_probes.py  each probe must catch the broken mock AND stay quiet on the fixed one,
+                  and each detection path has a test that fails when that path breaks
+  test_cli.py     the exit-code contract, including 3 when nothing ran
 examples/
   sample_report.md
 ```
 
-The paired tests are the point: a probe that only ever fires is an alarm, not a test, and a probe that never fires is decoration.
+The paired tests are the point: a probe that only ever fires is an alarm, not a test, and a probe that never fires is decoration. They are not enough on their own, though. A pair that only asks "found something?" stays green when the probe finds the wrong thing for the wrong reason. So each detection path also has a test that pins *which* finding, shape and severity it produces.
+
+## Prior work
+
+This is a small harness, not new research, and most of the ideas around it are older than it is.
+
+- Invariant Labs documented [tool poisoning attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks) on MCP, and a [toxic agent flow through the GitHub MCP server](https://invariantlabs.ai/blog/mcp-github-vulnerability), where an issue written by an outsider steers the agent. That second one is the pattern `content_injection` tests.
+- Simon Willison's [lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) (private data, untrusted content, external communication) is the clearest statement of why that pattern matters.
+- [AgentDojo](https://github.com/ethz-spylab/agentdojo) is an environment for evaluating prompt-injection attacks and defences on LLM agents.
+- [snyk/agent-scan](https://github.com/snyk/agent-scan), [cisco-ai-defense/mcp-scanner](https://github.com/cisco-ai-defense/mcp-scanner) and [Promptfoo's MCP security testing](https://www.promptfoo.dev/docs/red-team/mcp-security-testing/) scan or red-team MCP servers for tool poisoning and prompt injection. Use them for that; this does not try to compete.
+- On spending controls specifically, [agent-overspend-benchmark](https://github.com/Pink-Agentic-Payments/agent-overspend-benchmark) measures what agents *try* when asked to get around a spending rule. [payment-mcp-census](https://github.com/Pink-Agentic-Payments/payment-mcp-census) surveys which payment MCP servers document spending controls.
+
+What this adds, as far as I can tell, is the server side of that question: whether a cap or approval rule actually *holds* under concurrent charges, under retries with one idempotency key, and at the L−1 / L / L+1 boundary.
 
 ## Licence
 
