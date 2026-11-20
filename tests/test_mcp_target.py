@@ -387,8 +387,27 @@ def test_cli_mcp_config_keeps_the_exit_code_contract(tmp_path, capsys):
     assert cli.main(["--mcp-config", str(bare)]) == 3
 
 
-def test_cli_reports_a_bad_mapping_file_without_a_traceback(tmp_path):
+def test_cli_reports_a_bad_mapping_file_without_a_traceback(tmp_path, capsys):
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps(_config(tools={"charges": CHARGE})))
-    with pytest.raises(SystemExit, match="not a tool any probe uses"):
+    with pytest.raises(SystemExit) as exc:
         cli.main(["--mcp-config", str(bad)])
+    assert exc.value.code == 4  # not 1, which reads as "sev1 found"
+    err = capsys.readouterr().err
+    assert "not a tool any probe uses" in err
+    assert "Traceback" not in err
+
+
+def test_cli_exits_4_and_writes_the_report_when_the_server_stops_answering(tmp_path, capsys):
+    """A timeout mid-run: the charge may have committed, so the run stops."""
+    stalls = {**TOOLS, "charge": {**CHARGE, "tool": "stall"}}
+    raw = _config(tools=stalls, reset={"tool": "wipe"})
+    raw["timeout_seconds"] = 1
+    config = tmp_path / "stalls.json"
+    config.write_text(json.dumps(raw))
+    out = tmp_path / "report.md"
+    code = cli.main(["--mcp-config", str(config), "--probe", "spend_cap", "--out", str(out)])
+    assert code == 4
+    report = out.read_text()
+    assert "This run did not complete." in report
+    assert "not counted as a refusal" in report

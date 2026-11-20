@@ -97,8 +97,8 @@ Only with a Stripe **test-mode** key (`sk_test_...`), on an account with
 Issuing enabled in test mode. almega refuses any other key. Its code creates
 cardholders with a French billing address and EUR cards, so an account whose
 Issuing runs in another country may reject them. If it does, every
-`open_wallet` fails and the probe stops with that error. Nothing will have
-been spent.
+`open_wallet` fails and the run stops with that error and exit code 4.
+Nothing will have been spent.
 
 ```bash
 export STRIPE_SECRET_KEY=sk_test_...
@@ -127,3 +127,7 @@ slower than steps 1 and 2. A call that takes longer than `timeout_seconds`
   published anywhere.
 - The exit code is 1 whenever there is a sev1. That is the probe's verdict on
   the server. It does not mean the run failed.
+- Exit code 4 means the run stopped part-way: a timeout, a dropped
+  connection, or a setup call such as `open_wallet` that the server refused.
+  The report is still written; it says where the run stopped, and its counts
+  are not a reading of the server.

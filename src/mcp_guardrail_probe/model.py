@@ -77,21 +77,33 @@ class Finding:
 
 @dataclass
 class ProbeResult:
+    """One probe's outcome: skipped, aborted part-way, or run to the end.
+
+    An aborted probe keeps the attempts it finished before the failure, and
+    has no findings: a reading cut short cannot say what the server does.
+    """
+
     probe: str
     target: str
     skipped_reason: str | None = None
     findings: list[Finding] = field(default_factory=list)
     attempts: list[Attempt] = field(default_factory=list)
+    aborted_reason: str | None = None
 
     @property
     def skipped(self) -> bool:
         return self.skipped_reason is not None
+
+    @property
+    def aborted(self) -> bool:
+        return self.aborted_reason is not None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "probe": self.probe,
             "target": self.target,
             "skipped_reason": self.skipped_reason,
+            "aborted_reason": self.aborted_reason,
             "findings": [f.to_dict() for f in self.findings],
             "attempts": [a.to_dict() for a in self.attempts],
         }

@@ -41,7 +41,9 @@ mcp-guardrail-probe --demo-safe     # the fixed mock: finds nothing
 make test
 ```
 
-Exit codes are chosen so CI can gate on them: **0** clean, **1** a sev1 is present, **2** only sev2/sev3, **3** nothing was tested because every probe was skipped. Fail the build on 1 and 3.
+Exit codes are chosen so CI can gate on them: **0** clean, **1** a sev1 is present, **2** only sev2/sev3, **3** nothing was tested because every probe was skipped, **4** the run did not complete. Fail the build on 1, 3 and 4.
+
+4 means the target could not be loaded or reached, or a call failed in a way that is not a refusal: a timeout or dropped connection (the charge may have committed), a failed reset, a setup call the server refused, or a crash. The report is still written. It covers the probes that finished, marks the one that stopped as aborted with the attempts it got through, and lists the rest as not run. 4 wins over a sev1 found earlier in the same run, because a run that stopped part-way has incomplete counts.
 
 ## Running it against your own server
 
@@ -95,7 +97,7 @@ The probes speak a fixed vocabulary (`charge`, `set_spending_limit`, ...), and y
 
 Unknown keys are errors, not ignored, and `_comment` is allowed anywhere.
 
-**How a refusal is recognised.** An `isError: true` result and a JSON-RPC error both count as refused. So does any result a `refuse_when` rule matches, because many servers say no with an ordinary result such as `{"status": "declined"}`; without the rule the probe would read a declined charge as paid. A call that times out, or whose connection drops before it answers, is *not* counted as refused: the charge may have committed, so the run stops instead.
+**How a refusal is recognised.** An `isError: true` result and a JSON-RPC error both count as refused. So does any result a `refuse_when` rule matches, because many servers say no with an ordinary result such as `{"status": "declined"}`; without the rule the probe would read a declined charge as paid. A call that times out, or whose connection drops before it answers, is *not* counted as refused: the charge may have committed, so the run stops instead, with exit code 4.
 
 **Limits configured out-of-band.** Some servers take their cap or approval threshold from an env var, a config file or an operator API, and give the agent no tool to set it. Declare the value in `out_of_band_limits` and the probe tests that value, never calls `set_spending_limit` or `set_approval_threshold`, and sizes its amounts from it. `spend_cap` then requires a `reset`: each attack shape deliberately uses up the cap, so without one every shape after the first would start from the last one's spend. It skips with that reason rather than run.
 
@@ -188,7 +190,7 @@ servers/
 tests/
   test_probes.py      each probe must catch the broken mock AND stay quiet on the fixed one,
                       and each detection path has a test that fails when that path breaks
-  test_cli.py         the exit-code contract, including 3 when nothing ran
+  test_cli.py         the exit-code contract, including 3 when nothing ran and 4 when a run stops
   test_mcp_target.py  the MCP adapter against a fake server built on the same SDK
   test_mcp_config.py  the mapping file, and every file in servers/
   fake_mcp_server.py  that fake server: other names, other shapes, switchable bugs

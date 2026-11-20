@@ -156,3 +156,7 @@ approval is wiped with the database at the next reset, and nobody approves it.
   published anywhere.
 - The exit code is 1 whenever there is a sev1. That is the probe's verdict on
   the server. It does not mean the run failed.
+- Exit code 4 means the run stopped part-way: a timeout, a dropped
+  connection, or `reset-daemon.sh` failing (its output is in the message).
+  The report is still written; it says where the run stopped, and its counts
+  are not a reading of the server.

@@ -24,8 +24,9 @@ jobs:
     # Demonstrates the exit-code contract: the fixed mock must come back clean.
     # Gating a deploy on a sandbox instance of your own server works the same
     # way: any non-zero exit fails the step, including 3 ("every probe was
-    # skipped, nothing was tested"). See the README before pointing it at
-    # anything: the probes issue real charges.
+    # skipped, nothing was tested") and 4 ("the run did not complete": the
+    # target was unreachable, or a call timed out or failed mid-run). See the
+    # README before pointing it at anything: the probes issue real charges.
     # It also installs the bare package, so it proves the core still needs
     # nothing beyond the standard library.
     runs-on: ubuntu-latest

@@ -51,6 +51,11 @@ class Probe(ABC):
         self._counter: Iterator[int] = itertools.count(1)
         self._attempts: list[Attempt] = []
 
+    @property
+    def attempts(self) -> list[Attempt]:
+        """The attempts recorded so far, including by a run that raised."""
+        return list(self._attempts)
+
     # -- helpers -------------------------------------------------------
 
     def record(

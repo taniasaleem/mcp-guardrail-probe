@@ -25,7 +25,8 @@ def summarise(results: list[ProbeResult]) -> dict[str, int]:
 
 def probe_counts(results: list[ProbeResult]) -> dict[str, int]:
     skipped = sum(1 for r in results if r.skipped)
-    return {"run": len(results) - skipped, "skipped": skipped}
+    aborted = sum(1 for r in results if r.aborted)
+    return {"run": len(results) - skipped - aborted, "skipped": skipped, "aborted": aborted}
 
 
 def to_json(results: list[ProbeResult]) -> str:
@@ -45,15 +46,28 @@ def to_markdown(results: list[ProbeResult]) -> str:
     counts = summarise(results)
     probes = probe_counts(results)
     target = next((r.target for r in results), "unknown")
+    aborted = [r for r in results if r.aborted]
+    probe_line = f"**Probes:** {probes['run']} run · {probes['skipped']} skipped"
+    if aborted:
+        probe_line += f" · {probes['aborted']} aborted"
     lines: list[str] = [
         "# MCP guardrail probe report",
         "",
         f"**Target:** `{target}`  ",
         f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}  ",
-        f"**Probes:** {probes['run']} run · {probes['skipped']} skipped  ",
+        probe_line + "  ",
         f"**Findings:** {counts['sev1']} sev1 · {counts['sev2']} sev2 · {counts['sev3']} sev3",
         "",
     ]
+
+    if aborted:
+        lines += [
+            f"> **This run did not complete.** `{aborted[0].probe}` stopped part-way: "
+            f"{aborted[0].aborted_reason}. The findings below come only from the "
+            "probes that finished; the aborted probe's attempt log shows how far it "
+            "got. This is not a clean result.",
+            "",
+        ]
 
     if counts["sev1"]:
         lines += [
@@ -66,7 +80,9 @@ def to_markdown(results: list[ProbeResult]) -> str:
     findings = [f for r in results for f in r.findings]
     findings.sort(key=lambda f: _ORDER[f.severity])
 
-    if not findings and results and probes["run"] == 0:
+    if not findings and aborted:
+        lines += ["No findings from the probes that finished.", ""]
+    elif not findings and results and probes["run"] == 0:
         lines += [
             "**Nothing was tested.** Every probe was skipped because the target "
             "does not expose the tools it needs (see below). This is not a clean "
@@ -104,6 +120,11 @@ def to_markdown(results: list[ProbeResult]) -> str:
     for r in results:
         if r.skipped:
             lines.append(f"- `{r.probe}` — **skipped**: {r.skipped_reason}")
+        elif r.aborted:
+            lines.append(
+                f"- `{r.probe}` — **aborted** after {len(r.attempts)} attempts: "
+                f"{r.aborted_reason}"
+            )
         else:
             lines.append(
                 f"- `{r.probe}` — {len(r.attempts)} attempts, {len(r.findings)} findings"
