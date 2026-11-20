@@ -490,6 +490,7 @@ class McpTarget:
         try:
             self._connect()
             self._warn_unmapped()
+            self._warn_no_refusal_rule()
         except BaseException:
             self.close()
             raise
@@ -706,6 +707,29 @@ class McpTarget:
                     f"(it has: {', '.join(sorted(available)) or 'none'})",
                     file=sys.stderr,
                 )
+
+    def _warn_no_refusal_rule(self) -> None:
+        """Say so when a declined charge could only be recognised by isError.
+
+        Without refuse_when, an ordinary result that means no (JSON such as
+        {"status": "declined"}, or plain text) counts as accepted. The probe
+        does not guess the other way: counting results it cannot read as
+        refused could hide charges that went through, while counting them as
+        accepted errs toward a loud sev1 that someone will look at.
+        """
+        if "charge" not in self.list_tools():
+            return
+        mapping = self.config.tools.get("charge") or ToolMapping(tool="charge")
+        if mapping.refuse_when:
+            return
+        print(
+            f"mcp-guardrail-probe: {self.name}: tools.charge has no refuse_when, so only "
+            "isError results and JSON-RPC errors count as refused. A charge this server "
+            "declines with an ordinary result (such as {\"status\": \"declined\"} or "
+            "plain text) will be counted as accepted. That is fine if the server reports "
+            "every refusal with isError.",
+            file=sys.stderr,
+        )
 
 
 def parse_result(server_tool: str, result: Any) -> dict[str, Any]:

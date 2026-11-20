@@ -88,3 +88,25 @@ def test_a_session_that_will_not_close_in_time_is_cancelled(monkeypatch, short_w
         assert time.monotonic() - started < 2
     finally:
         target.close()
+
+
+NO_RULE_WARNING = "tools.charge has no refuse_when"
+
+
+def test_a_charge_mapping_with_no_refuse_when_is_warned_about(monkeypatch, capsys):
+    tools = {"charge": {"tool": "pay"}}
+    _target(monkeypatch, _client_class([]), tools=tools).close()
+    assert NO_RULE_WARNING in capsys.readouterr().err
+
+
+def test_no_warning_when_the_charge_has_a_refuse_when_rule(monkeypatch, capsys):
+    rule = [{"path": "status", "in": ["declined"]}]
+    tools = {"charge": {"tool": "pay", "refuse_when": rule}}
+    _target(monkeypatch, _client_class([]), tools=tools).close()
+    assert NO_RULE_WARNING not in capsys.readouterr().err
+
+
+def test_no_warning_when_the_server_has_nothing_to_charge_with(monkeypatch, capsys):
+    tools = {"charge": {"tool": "pay"}}
+    _target(monkeypatch, _client_class([], tools=("list",)), tools=tools).close()
+    assert NO_RULE_WARNING not in capsys.readouterr().err
