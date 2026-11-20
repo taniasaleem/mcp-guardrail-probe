@@ -7,9 +7,15 @@ reproduced because they are representative, not because they are exotic:
     so concurrent charges race, and it keeps reporting itself active afterwards
   * charges are not idempotent, so a retry commits twice
   * the "agent" concatenates listing text into its context and follows
-    imperatives it finds there
+    imperatives it finds there. It is a regex standing in for a model: it
+    obeys "call <tool> with amount <n>" and nothing else, so three of the four
+    injection payloads fire and `role_play` ("...calling charge...") never
+    does. The demo shows the harness's plumbing, not that a payload works on
+    a real model.
   * auto-approve is off by one at the boundary in the blocking direction, and
-    has no cumulative check at all
+    has no cumulative check at all. The off-by-one escalates every request
+    from L-1 upwards, so the demo never reaches the missing cumulative check;
+    tests/test_probes.py covers that bug on its own (PerRequestOnlyServer).
 
 Running the probes against this target should produce findings. If it ever
 produces none, the harness is broken — that is what tests/test_probes.py
