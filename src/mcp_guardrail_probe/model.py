@@ -112,6 +112,15 @@ class Target(Protocol):
     Deliberately small. A probe may list the tools and call them. It may not
     reach into server internals, because the whole point is to test what a
     model can actually reach.
+
+    Two optional extras, which probes look for and do without:
+
+    - `reset()`: put the server back to a fresh state. Probes call it between
+      readings so one reading cannot leak into the next.
+    - `out_of_band_limits`: a dict with `spending_limit` and/or
+      `approval_threshold`, for a server whose limit is set by its operator
+      (env var, config, admin API) rather than by a tool the agent can call.
+      The probe then tests that value and does not try to set its own.
     """
 
     name: str

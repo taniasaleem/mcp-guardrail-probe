@@ -274,3 +274,173 @@ def test_findings_serialise():
     assert payload["probe"] == "spend_cap"
     assert isinstance(payload["findings"], list)
     assert payload["findings"][0]["severity"] in {"sev1", "sev2", "sev3"}
+
+
+# -- limits configured out-of-band, and servers with less surface --------
+
+class OutOfBandCapServer(SafeCommerceServer):
+    """The cap belongs to the operator: no set_spending_limit, fixed at start."""
+
+    name = "mock://safe-commerce-out-of-band-cap"
+
+    def __init__(self, cap="100"):
+        self._preset = Decimal(cap)
+        self.calls = []
+        super().__init__()
+        self.out_of_band_limits = {"spending_limit": cap}
+
+    def reset(self):
+        super().reset()
+        self.cap = self._preset
+
+    def list_tools(self):
+        return [t for t in super().list_tools() if t != "set_spending_limit"]
+
+    def call_tool(self, tool, **kwargs):
+        self.calls.append(tool)
+        return super().call_tool(tool, **kwargs)
+
+
+class OutOfBandRacyServer(OutOfBandCapServer):
+    """The same, with the vulnerable mock's lost-update race in charge."""
+
+    name = "mock://vulnerable-commerce-out-of-band-cap"
+
+    def __init__(self, cap="100"):
+        super().__init__(cap)
+        self._slow = True
+
+    def _tool_charge(self, amount, idempotency_key=None):
+        return VulnerableCommerceServer._tool_charge(self, amount, idempotency_key)
+
+
+def test_out_of_band_cap_is_tested_and_never_set():
+    target = OutOfBandCapServer()
+    result = SpendCapProbe().run(target)
+    assert not result.skipped, result.skipped_reason
+    assert not result.findings, [f.title for f in result.findings]
+    assert "set_spending_limit" not in target.calls
+    assert _attempt(result, "concurrent").description.endswith("against a cap of 100")
+
+
+def test_out_of_band_cap_still_catches_the_race():
+    finding = _finding(SpendCapProbe().run(OutOfBandRacyServer()), "Spend cap does not hold")
+    assert finding.metric["worst_shape"] == "concurrent charges racing the balance"
+    assert finding.metric["max_overspend"] == "140"
+    assert finding.reproduction[0] == "configure the spending limit out-of-band at 100"
+
+
+def test_charge_sizes_follow_the_out_of_band_cap():
+    result = SpendCapProbe().run(OutOfBandCapServer(cap="1000"))
+    assert not result.findings, [f.title for f in result.findings]
+    assert _attempt(result, "single charge").description.startswith(
+        "single charge of 1500 against a cap of 1000"
+    )
+    assert _attempt(result, "four sequential").state_after["accepted"] == "900"
+
+
+class OutOfBandNoResetServer(NoResetSafeServer):
+    out_of_band_limits = {"spending_limit": "100"}
+
+
+def test_out_of_band_cap_without_reset_is_skipped_not_guessed():
+    result = SpendCapProbe().run(OutOfBandNoResetServer())
+    assert result.skipped
+    assert "out-of-band" in result.skipped_reason
+
+
+def test_spend_cap_without_reset_says_what_it_assumed():
+    attempt = _attempt(SpendCapProbe().run(NoResetSafeServer()), "four sequential")
+    assert attempt.state_after["fresh_state"] is False
+    assert "assumes set_spending_limit restarts the count" in attempt.description
+
+
+class NoCounterServer(VulnerableCommerceServer):
+    """Charges, but exposes no read-back of committed spend."""
+
+    name = "mock://vulnerable-commerce-no-counter"
+
+    def list_tools(self):
+        return [t for t in super().list_tools() if t != "get_spending_limit"]
+
+
+def test_spend_cap_runs_without_a_counter_and_still_finds_the_overspend():
+    result = SpendCapProbe().run(NoCounterServer())
+    titles = [f.title for f in result.findings]
+    assert "Spend cap does not hold" in titles
+    assert "Server under-reports committed spend" not in titles  # nothing to compare
+    assert _attempt(result, "concurrent").actual.endswith("server reports committed=not exposed")
+
+
+class RefuseEverythingServer(SafeCommerceServer):
+    """Refuses every charge, the way a wrong adapter mapping does."""
+
+    name = "mock://refuses-every-charge"
+
+    def _tool_charge(self, amount, idempotency_key=None):
+        raise ToolError("invalid params: amount_cents must be an integer")
+
+
+def test_spend_cap_reports_refusing_charges_that_fit():
+    result = SpendCapProbe().run(RefuseEverythingServer())
+    finding = _finding(result, "Spend cap refuses charges that fit under it")
+    assert finding.severity is Severity.SEV2
+    assert finding.direction is Direction.FAIL_CLOSED
+    assert finding.metric["accepted_total"] == "0"
+    assert "four sequential charges of 30: 0 accepted in total, where 90 fit" in finding.summary
+    assert "amount_cents must be an integer" in (
+        _attempt(result, "four sequential").state_after["refusal_reasons"][0]
+    )
+
+
+class OutOfBandApprovalServer(SafeCommerceServer):
+    """The approval threshold is the operator's (70, not the probe's 50)."""
+
+    name = "mock://safe-commerce-out-of-band-approval"
+    out_of_band_limits = {"approval_threshold": "70"}
+
+    def __init__(self):
+        self.calls = []
+        super().__init__()
+
+    def reset(self):
+        super().reset()
+        self.approval_threshold = Decimal("70")
+
+    def list_tools(self):
+        return [t for t in super().list_tools() if t != "set_approval_threshold"]
+
+    def call_tool(self, tool, **kwargs):
+        self.calls.append(tool)
+        return super().call_tool(tool, **kwargs)
+
+
+def test_out_of_band_approval_threshold_is_tested_and_never_set():
+    target = OutOfBandApprovalServer()
+    result = ApprovalThresholdProbe().run(target)
+    assert not result.skipped, result.skipped_reason
+    assert not result.findings, [f.title for f in result.findings]
+    assert "set_approval_threshold" not in target.calls
+    boundary = _attempt(result, "(boundary)")
+    assert boundary.description.startswith("submit_for_approval(amount=70) with limit 70")
+    assert boundary.actual == "approved"
+
+
+class StrictSchemaServer(SafeCommerceServer):
+    """Rejects any argument it does not know, idempotency_key included."""
+
+    name = "mock://strict-schema"
+
+    def _tool_charge(self, amount, idempotency_key=None):
+        if idempotency_key is not None:
+            raise ToolError("invalid params: unknown argument 'idempotency_key'")
+        return super()._tool_charge(amount)
+
+
+def test_a_retry_shape_that_tested_nothing_is_reported_not_passed():
+    """Both retries refused reads as "the retry held" unless the probe checks."""
+    result = SpendCapProbe().run(StrictSchemaServer())
+    finding = _finding(result, "Spend cap refuses charges that fit under it")
+    assert finding.metric["retry_first_accepted"] == "0"
+    assert finding.metric["accepted_total"] == finding.metric["expected_total"] == "90"
+    assert "idempotency key was refused" in finding.summary
