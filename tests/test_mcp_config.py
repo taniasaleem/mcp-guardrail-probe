@@ -70,6 +70,15 @@ def test_reset_takes_exactly_one_strategy():
         _cfg(reset={"tool": "wipe", "restart": True})
 
 
+def test_a_restart_reset_is_refused_over_http():
+    """Reconnecting to an http server keeps its state: no reading would be fresh."""
+    http = {"transport": "http", "url": "http://127.0.0.1:4024/mcp"}
+    with pytest.raises(ConfigError, match="reset.restart only works for stdio"):
+        McpConfig.from_dict({"name": "x", "server": http, "reset": {"restart": True}})
+    assert _cfg(reset={"restart": True}).reset == {"restart": True}  # stdio: a new process
+    assert McpConfig.from_dict({"name": "x", "server": http, "reset": {"tool": "wipe"}}).reset
+
+
 def test_out_of_band_limits_are_decimals_and_known_keys():
     assert _cfg(out_of_band_limits={"spending_limit": "100"}).out_of_band_limits == {
         "spending_limit": __import__("decimal").Decimal("100")

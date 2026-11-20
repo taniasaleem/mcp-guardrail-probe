@@ -355,6 +355,15 @@ class McpConfig:
                 raise ConfigError("reset.args goes with reset.tool")
             if "restart" in reset and reset["restart"] is not True:
                 raise ConfigError("reset.restart must be true")
+            if "restart" in reset and transport == "http":
+                # Over http a restart only reopens the session; the server and
+                # its state carry on, yet every reading would claim fresh state.
+                raise ConfigError(
+                    "reset.restart only works for stdio, where it starts a new server "
+                    "process. Over http it would reconnect to the same server, whose "
+                    "state carries over. Use reset.tool, or reset.command to restart "
+                    "the server yourself"
+                )
             if "command" in reset and not (
                 isinstance(reset["command"], list) and reset["command"]
             ):
@@ -525,7 +534,7 @@ class McpTarget:
                 print(output, file=sys.stderr)
             self._connect()
             return
-        # restart: a new session; for stdio, a new server process.
+        # restart: a new stdio server process (from_dict refuses it for http).
         self._disconnect()
         self._connect()
 
