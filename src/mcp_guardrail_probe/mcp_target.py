@@ -71,6 +71,25 @@ _TYPES = frozenset({"number", "integer", "string"})
 _HANDSHAKES = ("auto", "legacy")
 _MISSING = object()
 
+#: Control characters, newlines included: a server must not start a report line.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
+#: Shapes of credential a server may echo back in an error: Stripe secret,
+#: restricted and webhook keys, and bearer tokens.
+_SECRET = re.compile(r"\b(?:(?:sk|rk)_(?:test|live)_|whsec_)[A-Za-z0-9]+|\bBearer\s+[A-Za-z0-9._~+/=-]+")
+
+
+def _server_text(text: str, limit: int) -> str:
+    """Server-supplied text, made fit to quote in a report.
+
+    A server's own words are the best evidence of why it refused, but they
+    are not trusted. So: one line, anything shaped like a key or token
+    redacted (before cutting, so half a key is never left), and at most
+    `limit` characters.
+    """
+    text = _CONTROL.sub(" ", text).strip()
+    text = _SECRET.sub(lambda m: "Bearer [redacted]" if m.group().startswith("Bearer") else "[redacted]", text)
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
 
 class ConfigError(ValueError):
     """The mapping file is malformed or refers to something that is not there."""
@@ -273,9 +292,7 @@ class ToolMapping:
         for rule in self.refuse_when:
             reason = rule.refuses(result)
             if reason:
-                detail = json.dumps(result, default=str)
-                if len(detail) > 300:
-                    detail = detail[:297] + "..."
+                detail = _server_text(json.dumps(result, default=str), 300)
                 # The server's explanation goes before the record, because
                 # reports keep the start of a refusal and a record can put
                 # its explanation hundreds of characters in.
@@ -297,7 +314,8 @@ class ToolMapping:
         for path in self.reason:
             value = _get_path(result, path)
             if value is not _MISSING and value not in (None, ""):
-                return value if isinstance(value, str) else json.dumps(value, default=str)
+                text = value if isinstance(value, str) else json.dumps(value, default=str)
+                return _server_text(text, 200)
         return None
 
 
@@ -733,7 +751,9 @@ class McpTarget:
                     f"the connection closed before {server_tool} answered; "
                     "a charge may still have committed, so this is not counted as a refusal"
                 ) from exc
-            raise ToolError(f"{server_tool}: {exc.message}", {"code": exc.code}) from exc
+            raise ToolError(
+                f"{server_tool}: {_server_text(str(exc.message), 300)}", {"code": exc.code}
+            ) from exc
         return parse_result(server_tool, result)
 
     def _warn_unmapped(self) -> None:
@@ -784,7 +804,7 @@ def parse_result(server_tool: str, result: Any) -> dict[str, Any]:
         if getattr(block, "type", None) == "text"
     ]
     if getattr(result, "is_error", False):
-        message = " ".join(t for t in texts if t).strip() or f"{server_tool} returned isError"
+        message = _server_text(" ".join(t for t in texts if t), 300) or f"{server_tool} returned isError"
         raise ToolError(message, {"isError": True, "content": [{"type": "text", "text": t} for t in texts]})
     if len(texts) == 1:
         try:

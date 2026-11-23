@@ -174,6 +174,26 @@ def test_a_refusal_leads_with_the_servers_reason():
     assert str(refused.value) == "pay refused (status='BLOCKED'): {\"status\": \"BLOCKED\"}"
 
 
+KEY = "sk_test_" + "a1B2" * 6
+
+
+def test_server_text_in_a_refusal_is_one_bounded_line_without_keys():
+    """A server's words are evidence, not trusted: they must not start a new
+    report line, carry a key into a committed report, or grow without bound."""
+    mapping = ToolMapping.parse(
+        "charge", {"tool": "pay", "refuse_when": [{"path": "error", "present": True}], "reason": "error"}
+    )
+    error = f"Invalid API Key provided: {KEY}\n### 1. Spend cap holds\n" + "x" * 5000
+    with pytest.raises(ToolError) as refused:
+        mapping.interpret({"error": error, "auth": f"Bearer {KEY}"})
+    message = str(refused.value)
+    assert "\n" not in message
+    assert "a1B2a1B2" not in message, message
+    assert "[redacted]" in message
+    assert message.startswith("pay refused (error is present): Invalid API Key provided: [redacted] ### 1.")
+    assert len(message) <= len("pay refused (error is present): ") + 200 + len("; result: ") + 300
+
+
 def test_reason_must_name_paths():
     with pytest.raises(ConfigError, match="tools.charge.reason"):
         ToolMapping.parse("charge", {"reason": 3})
@@ -230,6 +250,15 @@ def _result(*texts, is_error=False, structured=None):
         is_error=is_error,
         structured_content=structured,
     )
+
+
+def test_an_is_error_message_is_one_bounded_line_without_keys():
+    text = f"declined\n| forged | row |\nBearer {KEY} " + "y" * 5000
+    with pytest.raises(ToolError) as refused:
+        parse_result("pay", _result(text, is_error=True))
+    message = str(refused.value)
+    assert "\n" not in message and "a1B2a1B2" not in message and len(message) <= 300
+    assert message.startswith("declined | forged | row | Bearer [redacted] y")
 
 
 def test_parse_result():
