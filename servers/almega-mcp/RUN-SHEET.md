@@ -121,8 +121,8 @@ slower than steps 1 and 2. A call that takes longer than `timeout_seconds`
 
 ## 4. After the runs
 
-- Compare each report with the expected readings in the audit notes, which
-  are kept outside this repository.
+- Compare each report with the readings from the first runs of steps 1 and
+  2, in [`RESULTS.md`](RESULTS.md).
 - If a defect reproduces, tell almega's maintainers before the result is
   published anywhere.
 - The exit code is 1 whenever there is a sev1. That is the probe's verdict on

@@ -64,6 +64,8 @@ pip install -e ".[mcp]"
 mcp-guardrail-probe --mcp-config my-server.json --probe spend_cap --probe approval_threshold
 ```
 
+It has been run this way against one real server so far: both of [almega-mcp](https://github.com/almega-ai/almega-mcp)'s servers on their in-memory backend, which held their caps and approval boundaries. [`servers/almega-mcp/RESULTS.md`](servers/almega-mcp/RESULTS.md) has the readings and what they do and don't show.
+
 The probes speak a fixed vocabulary (`charge`, `set_spending_limit`, ...), and your server has its own. The JSON file says how one maps onto the other. Nothing is guessed: a probe whose tools are not mapped and not present under its own names is skipped, and the run says so.
 
 ```json
@@ -187,7 +189,8 @@ src/mcp_guardrail_probe/
   mock_server/
     server.py            VulnerableCommerceServer and SafeCommerceServer
 servers/
-  almega-mcp/     mapping files and run sheet for one open-source agent wallet
+  almega-mcp/     mapping files and run sheet for one open-source agent wallet,
+                  and the results of its first runs
   agent-wallet/   ...and for another, with the script that resets its daemon
 tests/
   test_probes.py      each probe must catch the broken mock AND stay quiet on the fixed one,

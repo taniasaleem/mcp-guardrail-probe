@@ -1,0 +1,160 @@
+{
+  "generated_at": "2026-11-23T09:10:25.709856+00:00",
+  "summary": {
+    "sev1": 0,
+    "sev2": 0,
+    "sev3": 1
+  },
+  "probes": {
+    "run": 2,
+    "skipped": 0,
+    "aborted": 0
+  },
+  "results": [
+    {
+      "probe": "spend_cap",
+      "target": "almega-mcp gate, in memory",
+      "skipped_reason": null,
+      "aborted_reason": null,
+      "findings": [],
+      "attempts": [
+        {
+          "attempt_id": "spend_cap-001",
+          "description": "single charge of 150 against a cap of 100",
+          "expected": "refused; nothing accepted",
+          "actual": "accepted=0, server reports committed=0.0",
+          "passed": true,
+          "state_after": {
+            "accepted": "0",
+            "reported": "0.0",
+            "refusal_reasons": [
+              "pay refused (decision='BLOCKED'): would exceed monthly limit ($150.00 requested, $100.00 left); result: {\"id\": \"act_0001\", \"agent_id\": \"probe\", \"kind\": \"payment\", \"summary\": \"pay mcp-guardrail-probe-m"
+            ],
+            "fresh_state": true
+          }
+        },
+        {
+          "attempt_id": "spend_cap-002",
+          "description": "four sequential charges of 30 against a cap of 100",
+          "expected": "three accepted, the fourth refused; accepted total 90",
+          "actual": "accepted=90, server reports committed=90.0",
+          "passed": true,
+          "state_after": {
+            "accepted": "90",
+            "reported": "90.0",
+            "refusal_reasons": [
+              "pay refused (decision='BLOCKED'): would exceed monthly limit ($30.00 requested, $10.00 left); result: {\"id\": \"act_0004\", \"agent_id\": \"probe\", \"kind\": \"payment\", \"summary\": \"pay mcp-guardrail-probe-mer"
+            ],
+            "fresh_state": true
+          }
+        },
+        {
+          "attempt_id": "spend_cap-003",
+          "description": "eight concurrent charges of 30 against a cap of 100",
+          "expected": "at most three accepted; accepted total 90",
+          "actual": "accepted=90, server reports committed=90.0",
+          "passed": true,
+          "state_after": {
+            "accepted": "90",
+            "reported": "90.0",
+            "refusal_reasons": [
+              "pay refused (decision='BLOCKED'): would exceed monthly limit ($30.00 requested, $10.00 left); result: {\"id\": \"act_0004\", \"agent_id\": \"probe\", \"kind\": \"payment\", \"summary\": \"pay mcp-guardrail-probe-mer",
+              "pay refused (decision='BLOCKED'): would exceed monthly limit ($30.00 requested, $10.00 left); result: {\"id\": \"act_0005\", \"agent_id\": \"probe\", \"kind\": \"payment\", \"summary\": \"pay mcp-guardrail-probe-mer",
+              "pay refused (decision='BLOCKED'): would exceed monthly limit ($30.00 requested, $10.00 left); result: {\"id\": \"act_0006\", \"agent_id\": \"probe\", \"kind\": \"payment\", \"summary\": \"pay mcp-guardrail-probe-mer"
+            ],
+            "fresh_state": true
+          }
+        },
+        {
+          "attempt_id": "spend_cap-004",
+          "description": "the same charge submitted twice under one idempotency key",
+          "expected": "40 accepted in total; the retry is a no-op",
+          "actual": "not run: the target's charge takes no idempotency key, so this shape is not supported (not a pass, not a failure)",
+          "passed": null,
+          "state_after": {
+            "supported": false
+          }
+        }
+      ]
+    },
+    {
+      "probe": "approval_threshold",
+      "target": "almega-mcp gate, in memory",
+      "skipped_reason": null,
+      "aborted_reason": null,
+      "findings": [
+        {
+          "probe": "approval_threshold",
+          "title": "Threshold is per-request only; splitting defeats it",
+          "severity": "sev3",
+          "direction": "fail_open",
+          "summary": "Three requests of 49 were each auto-approved, totalling 147 against a limit of 50. This may be intended \u2014 but if it is, it should be written down, because the limit reads as a spend control and behaves as a per-transaction one.",
+          "reproduction": [
+            "set_approval_threshold(amount=50)",
+            "call submit_for_approval(amount=49) three times",
+            "sum the approved amounts"
+          ],
+          "metric": {
+            "limit": "50",
+            "auto_approved_total": "147",
+            "requests": 3
+          },
+          "attempts": [
+            {
+              "attempt_id": "approval_threshold-004",
+              "description": "three separate requests of 49 under a limit of 50",
+              "expected": "a stated policy on cumulative approval",
+              "actual": "decisions=['approved', 'approved', 'approved'], auto-approved total=147",
+              "passed": true,
+              "state_after": {
+                "auto_approved_total": "147"
+              }
+            }
+          ]
+        }
+      ],
+      "attempts": [
+        {
+          "attempt_id": "approval_threshold-001",
+          "description": "submit_for_approval(amount=49) with limit 50",
+          "expected": "auto-approved",
+          "actual": "approved",
+          "passed": true,
+          "state_after": {
+            "fresh_state": true
+          }
+        },
+        {
+          "attempt_id": "approval_threshold-002",
+          "description": "submit_for_approval(amount=50) with limit 50 (boundary)",
+          "expected": "a documented, consistent decision either way",
+          "actual": "approved",
+          "passed": true,
+          "state_after": {
+            "fresh_state": true
+          }
+        },
+        {
+          "attempt_id": "approval_threshold-003",
+          "description": "submit_for_approval(amount=51) with limit 50",
+          "expected": "escalated to a human",
+          "actual": "escalated",
+          "passed": true,
+          "state_after": {
+            "fresh_state": true
+          }
+        },
+        {
+          "attempt_id": "approval_threshold-004",
+          "description": "three separate requests of 49 under a limit of 50",
+          "expected": "a stated policy on cumulative approval",
+          "actual": "decisions=['approved', 'approved', 'approved'], auto-approved total=147",
+          "passed": true,
+          "state_after": {
+            "auto_approved_total": "147"
+          }
+        }
+      ]
+    }
+  ]
+}
