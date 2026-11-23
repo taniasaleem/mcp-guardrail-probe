@@ -266,6 +266,13 @@ def _result(*texts, is_error=False, structured=None):
         ("github_pat_11ABCDEFG0_" + "aB3" * 10, ""),
         ("xoxb-1234567890-0987654321-" + "Kq" * 10, ""),
         ("https://probe:s3cr3t-pa55@api.example.test/v1", "https://"),
+        # Auth schemes are case-insensitive in HTTP.
+        ("bearer eyJhbGciOi.J9eyJzdWIi.OiIxMjM0", "bearer "),
+        ("BASIC dXNlcjpwYXNzd29yZA==", "BASIC "),
+        # A strong prefix is enough on its own, even for a short or cut-off key.
+        ("sk_test_abc123", ""),
+        ("whsec_ab12", ""),
+        ("ghp_x9Yz", ""),
     ],
 )
 def test_credential_shapes_are_redacted(secret, kept):
@@ -278,7 +285,10 @@ def test_credential_shapes_are_redacted(secret, kept):
 
 def test_words_that_only_resemble_a_credential_are_kept():
     """Redaction goes by known shapes, so a refusal's evidence survives it."""
-    text = "risk-free sk-ill: token tx_0001 Basically declined, see https://api.example.test/v1"
+    text = (
+        "risk-free sk-ill: token tx_0001 Basically declined, see https://api.example.test/v1; "
+        "token expired, basic functionality, bearer of bad news, Token v2, built on sk-learn"
+    )
     with pytest.raises(ToolError) as refused:
         parse_result("pay", _result(text, is_error=True))
     assert str(refused.value) == text
