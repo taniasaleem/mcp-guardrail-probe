@@ -75,22 +75,37 @@ _MISSING = object()
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
 #: Shapes of credential a server may echo back in an error. A known shape,
 #: not a guess from randomness: transaction ids and amounts are the report's
-#: evidence and must stay.
+#: evidence and must stay. Where a shape is ambiguous, hiding wins: an
+#: ordinary word lost from a report costs less than a credential leaked.
 #:
 #: - Keys with a strong prefix (Stripe secret, restricted and webhook keys;
 #:   GitHub and Slack tokens): the prefix is enough, so even a short or
 #:   cut-off key is caught.
 #: - sk- API keys: "sk-" also starts ordinary words, so 16 characters at least.
-#: - The credential after a Bearer, Basic or Token scheme, in any case (HTTP
-#:   schemes are case-insensitive): at least 12 characters with a digit, so
-#:   "token expired" or "basic functionality" survive.
+#: - Whatever follows "Authorization:" or "authorization=", scheme or not.
+#: - Whatever follows Bearer or Basic, in any case (HTTP schemes are
+#:   case-insensitive), at any length. "basic functionality" loses its second
+#:   word, on purpose.
+#: - After Token, in any case, 8 characters or more with a digit. "token
+#:   expired" is a common refusal reason, and real Token credentials are long
+#:   hex strings.
 #: - The user:password part of a URL.
 _SECRET = re.compile(
     r"\b(?:(?:sk|rk)_(?:test|live)_|whsec_|gh[pousr]_|github_pat_|xox[abprs]-)[A-Za-z0-9_-]{4,}"
     r"|\bsk-[A-Za-z0-9_-]{16,}"
-    r"|\b(?P<scheme>(?i:bearer|basic|token))\s+(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{12,}"
+    r"|(?P<header>\b(?i:authorization)[\"']?\s*[:=]\s*[\"']?(?:(?i:bearer|basic|token)\s+)?)[^\s\"',;]+"
+    r"|\b(?P<scheme>(?i:bearer|basic))\s+[A-Za-z0-9._~+/=-]+"
+    r"|\b(?P<token>(?i:token))\s+(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{8,}"
     r"|(?<=://)[^/\s:@]+:[^/\s@]+(?=@)"
 )
+
+
+def _redacted(match: re.Match[str]) -> str:
+    """Keep the label around a credential (header, scheme), hide the credential."""
+    if match.group("header"):
+        return f"{match.group('header')}[redacted]"
+    label = match.group("scheme") or match.group("token")
+    return f"{label} [redacted]" if label else "[redacted]"
 
 
 def _server_text(text: str, limit: int) -> str:
@@ -102,9 +117,7 @@ def _server_text(text: str, limit: int) -> str:
     `limit` characters.
     """
     text = _CONTROL.sub(" ", text).strip()
-    text = _SECRET.sub(
-        lambda m: f"{m.group('scheme')} [redacted]" if m.group("scheme") else "[redacted]", text
-    )
+    text = _SECRET.sub(_redacted, text)
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
 

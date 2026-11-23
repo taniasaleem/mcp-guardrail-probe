@@ -269,6 +269,14 @@ def _result(*texts, is_error=False, structured=None):
         # Auth schemes are case-insensitive in HTTP.
         ("bearer eyJhbGciOi.J9eyJzdWIi.OiIxMjM0", "bearer "),
         ("BASIC dXNlcjpwYXNzd29yZA==", "BASIC "),
+        # After Bearer or Basic, any credential at all: no length or digit rule.
+        ("Bearer abcdefghijklmnop", "Bearer "),
+        ("bearer abc", "bearer "),
+        ("Basic dTpw", "Basic "),
+        # An Authorization header hides whatever follows it.
+        ("Authorization: Token deadbeef", "Authorization: Token "),
+        ("authorization=s3cr3t", "authorization="),
+        ('"Authorization": "Bearer abc"', '"Authorization": "Bearer '),
         # A strong prefix is enough on its own, even for a short or cut-off key.
         ("sk_test_abc123", ""),
         ("whsec_ab12", ""),
@@ -287,11 +295,19 @@ def test_words_that_only_resemble_a_credential_are_kept():
     """Redaction goes by known shapes, so a refusal's evidence survives it."""
     text = (
         "risk-free sk-ill: token tx_0001 Basically declined, see https://api.example.test/v1; "
-        "token expired, basic functionality, bearer of bad news, Token v2, built on sk-learn"
+        "token expired, token required, Token v2, built on sk-learn"
     )
     with pytest.raises(ToolError) as refused:
         parse_result("pay", _result(text, is_error=True))
     assert str(refused.value) == text
+
+
+def test_after_bearer_or_basic_the_next_word_is_hidden_on_purpose():
+    """The trade-off, pinned: after Bearer or Basic, hiding an ordinary word
+    costs far less than leaking a credential, so no word is let through."""
+    with pytest.raises(ToolError) as refused:
+        parse_result("pay", _result("basic functionality only; bearer of bad news", is_error=True))
+    assert str(refused.value) == "basic [redacted] only; bearer [redacted] bad news"
 
 
 def test_an_is_error_message_is_one_bounded_line_without_keys():
