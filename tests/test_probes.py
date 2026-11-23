@@ -106,6 +106,19 @@ def test_a_target_without_an_idempotency_key_gets_the_retry_reported_as_not_supp
     assert "| – |" in to_markdown([result])
 
 
+def test_the_attempt_log_keeps_server_text_inside_its_table_cell():
+    """An attempt's actual text can quote a server; a | or a newline in it
+    must not add a column or start a row the probe did not write."""
+    from mcp_guardrail_probe.model import Attempt, ProbeResult
+
+    forged = "refused | forged cell\n| `p-002` | forged row | refused | refused | ✓ |"
+    attempt = Attempt("p-001", "a charge", "refused", forged, True)
+    lines = to_markdown([ProbeResult(probe="p", target="t", attempts=[attempt])]).splitlines()
+    rows = [line for line in lines if line.startswith("| `p-")]
+    assert len(rows) == 1, rows
+    assert rows[0].replace("\\|", "").count("|") == 6, rows[0]  # five cells
+
+
 def test_spend_cap_reports_the_counter_disagreeing_with_its_ledger():
     finding = _finding(
         SpendCapProbe().run(VulnerableCommerceServer()), "Server under-reports committed spend"

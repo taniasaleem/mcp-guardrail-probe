@@ -15,6 +15,12 @@ from .model import ProbeResult, Severity
 _ORDER = {Severity.SEV1: 0, Severity.SEV2: 1, Severity.SEV3: 2}
 
 
+def _cell(text: str) -> str:
+    """Text for one attempt-log cell. It can quote a server, so a | must not
+    add a column and a line break must not start a row."""
+    return " ".join(str(text).split("\n")).replace("\r", " ").replace("|", "\\|")
+
+
 def summarise(results: list[ProbeResult]) -> dict[str, int]:
     counts = {s.value: 0 for s in Severity}
     for result in results:
@@ -146,7 +152,8 @@ def to_markdown(results: list[ProbeResult]) -> str:
         for probe, a in attempts:
             ok = "–" if a.passed is None else "✓" if a.passed else "✗"
             lines.append(
-                f"| `{a.attempt_id}` | {a.description} | {a.expected} | {a.actual} | {ok} |"
+                f"| `{a.attempt_id}` | {_cell(a.description)} | {_cell(a.expected)} "
+                f"| {_cell(a.actual)} | {ok} |"
             )
         lines.append("")
 
