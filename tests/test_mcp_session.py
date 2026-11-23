@@ -29,7 +29,7 @@ def _client_class(close_delays, shielded=False, tools=("pay",)):
     delays = list(close_delays)
 
     class StandInClient:
-        def __init__(self, server, read_timeout_seconds=None, cache=None):
+        def __init__(self, server, read_timeout_seconds=None, cache=None, mode="auto"):
             self.delay = delays.pop(0) if delays else 0.0
 
         async def __aenter__(self):

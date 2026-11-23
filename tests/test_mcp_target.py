@@ -215,6 +215,25 @@ def test_an_in_band_refusal_counts_as_refused_with_a_refuse_when_rule():
     assert "over budget" in _attempt(result, "single charge").state_after["refusal_reasons"][0]
 
 
+def test_a_legacy_handshake_reaches_the_sdk_and_still_connects(monkeypatch):
+    """`handshake: legacy` skips the server/discover probe that a 1.x server
+    answers with a page of validation warnings before the SDK falls back."""
+    import mcp
+
+    modes = []
+    real_client = mcp.Client
+
+    def spy(*args, **kwargs):
+        modes.append(kwargs.get("mode"))
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(mcp, "Client", spy)
+    server = {"transport": "stdio", "command": sys.executable, "args": [str(FAKE)], "handshake": "legacy"}
+    with fake(server=server) as target:
+        assert "charge" in target.list_tools()
+    with fake() as target:
+        assert "charge" in target.list_tools()
+    assert modes == ["legacy", "auto"]
 
 
 def test_the_servers_reason_survives_a_long_refusal_record():

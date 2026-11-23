@@ -143,6 +143,11 @@ def test_refuse_when_rules():
         mapping.interpret({"something": "else"})
 
 
+def test_handshake_is_auto_unless_the_mapping_says_legacy():
+    assert _cfg().handshake == "auto"
+    assert _cfg(server={**STDIO, "handshake": "legacy"}).handshake == "legacy"
+    with pytest.raises(ConfigError, match="server.handshake"):
+        _cfg(server={**STDIO, "handshake": "initialize"})
 
 
 def test_a_refusal_leads_with_the_servers_reason():

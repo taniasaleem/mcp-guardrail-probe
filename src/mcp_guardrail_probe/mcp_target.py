@@ -68,6 +68,7 @@ LIMIT_KEYS = frozenset({"spending_limit", "approval_threshold"})
 
 _VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 _TYPES = frozenset({"number", "integer", "string"})
+_HANDSHAKES = ("auto", "legacy")
 _MISSING = object()
 
 
@@ -339,6 +340,10 @@ class McpConfig:
     cwd: str | None = None
     url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    #: The SDK's connect mode. "auto" tries server/discover first and falls
+    #: back; "legacy" goes straight to initialize, which a server built on the
+    #: 1.x SDK expects (it logs the discover attempt as a validation error).
+    handshake: str = "auto"
     timeout_seconds: float = 60.0
     reset: dict[str, Any] | None = None
     out_of_band_limits: dict[str, Decimal] = field(default_factory=dict)
@@ -377,7 +382,7 @@ class McpConfig:
         server = _check_keys(
             "server",
             _expand(raw.get("server")),
-            {"transport", "command", "args", "env", "cwd", "url", "headers"},
+            {"transport", "command", "args", "env", "cwd", "url", "headers", "handshake"},
         )
         transport = server.get("transport")
         if transport == "stdio":
@@ -394,6 +399,12 @@ class McpConfig:
                     raise ConfigError(f"server.{key} applies to stdio, not http")
         else:
             raise ConfigError("server.transport must be 'stdio' or 'http'")
+        handshake = server.get("handshake", "auto")
+        if handshake not in _HANDSHAKES:
+            raise ConfigError(
+                f"server.handshake must be one of {list(_HANDSHAKES)}, got {handshake!r}. "
+                "Use 'legacy' for a server built on the 1.x MCP SDK"
+            )
 
         reset = raw.get("reset")
         if reset is not None:
@@ -458,6 +469,7 @@ class McpConfig:
             cwd=server.get("cwd"),
             url=server.get("url"),
             headers={str(k): str(v) for k, v in server.get("headers", {}).items()},
+            handshake=handshake,
             timeout_seconds=float(raw.get("timeout_seconds", 60.0)),
             reset=reset,
             out_of_band_limits=limits,
@@ -636,7 +648,10 @@ class McpTarget:
             async with _http_client(self.config) as http:
                 server = transport if transport is not None else _streamable(self.config, http)
                 async with Client(
-                    server, read_timeout_seconds=self.config.timeout_seconds, cache=None
+                    server,
+                    read_timeout_seconds=self.config.timeout_seconds,
+                    cache=None,
+                    mode=self.config.handshake,
                 ) as client:
                     names: list[str] = []
                     cursor = None

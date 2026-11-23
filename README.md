@@ -87,7 +87,7 @@ The probes speak a fixed vocabulary (`charge`, `set_spending_limit`, ...), and y
 
 | Key | What it does |
 |---|---|
-| `server` | `{"transport": "stdio", "command", "args", "env", "cwd"}` or `{"transport": "http", "url", "headers"}`. `${VAR}` and `${VAR:-default}` come from your environment, so keys stay out of the file. A stdio server gets only a minimal environment (`PATH`, `HOME` and a few more) plus `env`, so pass anything else it needs explicitly. |
+| `server` | `{"transport": "stdio", "command", "args", "env", "cwd"}` or `{"transport": "http", "url", "headers"}`. `${VAR}` and `${VAR:-default}` come from your environment, so keys stay out of the file. A stdio server gets only a minimal environment (`PATH`, `HOME` and a few more) plus `env`, so pass anything else it needs explicitly. `"handshake": "legacy"` connects with the `initialize` handshake straight away; use it for a server built on the 1.x MCP SDK, which otherwise logs a page of validation errors when the client first tries `server/discover` (the default, `"auto"`, then falls back and works). |
 | `tools.<probe tool>.tool` | The server's name for it. |
 | `rename`, `fixed`, `drop`, `types` | Argument renames (probe name to server name), constant arguments the server needs, probe arguments to leave out, and `number`, `integer` or `string` coercions. A `fixed` value may not override an argument the probe sends. Dropping `idempotency_key` from `charge` says the server has no idempotency key: `spend_cap` then reports its retry shape as not supported instead of sending it. |
 | `refuse_when` | When an ordinary result means no: `{"path": "status", "in": [...]}`, `"not_in": [...]` or `"present": true`. Dotted paths reach into nested results. |
