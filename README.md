@@ -78,7 +78,8 @@ The probes speak a fixed vocabulary (`charge`, `set_spending_limit`, ...), and y
       "tool": "make_payment",
       "rename": {"amount": "amount_cents", "idempotency_key": "request_id"},
       "types": {"amount_cents": "integer"},
-      "refuse_when": [{"path": "status", "in": ["declined"]}]
+      "refuse_when": [{"path": "status", "in": ["declined"]}],
+      "reason": "reason"
     }
   }
 }
@@ -90,6 +91,7 @@ The probes speak a fixed vocabulary (`charge`, `set_spending_limit`, ...), and y
 | `tools.<probe tool>.tool` | The server's name for it. |
 | `rename`, `fixed`, `drop`, `types` | Argument renames (probe name to server name), constant arguments the server needs, probe arguments to leave out, and `number`, `integer` or `string` coercions. A `fixed` value may not override an argument the probe sends. Dropping `idempotency_key` from `charge` says the server has no idempotency key: `spend_cap` then reports its retry shape as not supported instead of sending it. |
 | `refuse_when` | When an ordinary result means no: `{"path": "status", "in": [...]}`, `"not_in": [...]` or `"present": true`. Dotted paths reach into nested results. |
+| `reason` | Where a refusal result holds the server's own explanation: a path, or a list of paths where the first one present wins, such as `["reason", "error"]`. The report then leads each refusal with it, ahead of the result itself. Without it, a long result can push the explanation past the point where the report cuts a refusal message off. |
 | `result` | Fields the probes read, taken from the server's result: `"committed_spend": "spent_total"`, or `{"path": "outcome", "map": {"WITHIN_CEILING": "approved"}}`. |
 | `reset` | How to give each reading fresh state: `{"tool": "..."}` calls a server tool, `{"restart": true}` starts a new server process (stdio only, and it resets only a server that keeps its state in memory; over http it would reconnect to the same server, so it is refused), `{"command": [...]}` runs a local command (from the file's directory) and then reconnects. |
 | `out_of_band_limits` | `spending_limit` and/or `approval_threshold`, for a server whose limit its operator sets (below). `approval_threshold` must be above 1, because the probe tests L−1. |

@@ -143,6 +143,40 @@ def test_refuse_when_rules():
         mapping.interpret({"something": "else"})
 
 
+
+
+def test_a_refusal_leads_with_the_servers_reason():
+    """The explanation comes first, so a report that keeps the start keeps it."""
+    mapping = ToolMapping.parse(
+        "charge",
+        {
+            "tool": "pay",
+            "refuse_when": [{"path": "error", "present": True}, {"path": "status", "not_in": ["APPROVED"]}],
+            "reason": ["reason", "error"],
+        },
+    )
+    record = {"id": "tx_1", "merchant": "m" * 300, "status": "BLOCKED", "reason": "would exceed monthly limit"}
+    with pytest.raises(ToolError) as refused:
+        mapping.interpret(record)
+    assert str(refused.value).startswith("pay refused (status='BLOCKED'): would exceed monthly limit; result: {")
+    # The first path that is present wins; here the record has no reason, only an error.
+    with pytest.raises(ToolError) as refused:
+        mapping.interpret({"error": "no wallet for agent 'probe'"})
+    assert str(refused.value).startswith("pay refused (error is present): no wallet for agent 'probe'; result: {")
+    # With no reason in the result, the refusal reads as before: rule, then result.
+    with pytest.raises(ToolError) as refused:
+        mapping.interpret({"status": "BLOCKED"})
+    assert str(refused.value) == "pay refused (status='BLOCKED'): {\"status\": \"BLOCKED\"}"
+
+
+def test_reason_must_name_paths():
+    with pytest.raises(ConfigError, match="tools.charge.reason"):
+        ToolMapping.parse("charge", {"reason": 3})
+    with pytest.raises(ConfigError, match="tools.charge.reason"):
+        ToolMapping.parse("charge", {"reason": ["reason", 3]})
+    assert ToolMapping.parse("charge", {"reason": "error"}).reason == ("error",)
+
+
 def test_a_result_map_matches_json_true_false_null_and_numbers():
     """A map is JSON, so its keys are written "true", "null", "2", never "True"."""
     mapping = ToolMapping.parse(

@@ -204,13 +204,23 @@ class ToolMapping:
     types: dict[str, str] = field(default_factory=dict)
     refuse_when: tuple[RefuseRule, ...] = ()
     result: dict[str, ResultField] = field(default_factory=dict)
+    #: Where a refusal result carries the server's own explanation. The first
+    #: path present wins.
+    reason: tuple[str, ...] = ()
 
     @classmethod
     def parse(cls, probe_tool: str, data: Any) -> ToolMapping:
         where = f"tools.{probe_tool}"
         data = _check_keys(
-            where, data, {"tool", "rename", "fixed", "drop", "types", "refuse_when", "result"}
+            where,
+            data,
+            {"tool", "rename", "fixed", "drop", "types", "refuse_when", "result", "reason"},
         )
+        reason = data.get("reason", [])
+        if isinstance(reason, str):
+            reason = [reason]
+        if not isinstance(reason, list) or not all(isinstance(p, str) for p in reason):
+            raise ConfigError(f"{where}.reason must be a path or a list of paths, e.g. \"reason\"")
         types = dict(data.get("types", {}))
         bad = {k: v for k, v in types.items() if v not in _TYPES}
         if bad:
@@ -235,6 +245,7 @@ class ToolMapping:
                 for i, rule in enumerate(data.get("refuse_when", []))
             ),
             result=result,
+            reason=tuple(reason),
         )
 
     def arguments(self, probe_tool: str, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -264,6 +275,12 @@ class ToolMapping:
                 detail = json.dumps(result, default=str)
                 if len(detail) > 300:
                     detail = detail[:297] + "..."
+                # The server's explanation goes before the record, because
+                # reports keep the start of a refusal and a record can put
+                # its explanation hundreds of characters in.
+                explanation = self._explanation(result)
+                if explanation:
+                    detail = f"{explanation}; result: {detail}"
                 raise ToolError(f"{self.tool} refused ({reason}): {detail}", result)
         out = dict(result)
         for name, spec in self.result.items():
@@ -274,6 +291,13 @@ class ToolMapping:
                 value = spec.map.get(_map_key(value), value)
             out[name] = value
         return out
+
+    def _explanation(self, result: dict[str, Any]) -> str | None:
+        for path in self.reason:
+            value = _get_path(result, path)
+            if value is not _MISSING and value not in (None, ""):
+                return value if isinstance(value, str) else json.dumps(value, default=str)
+        return None
 
 
 def _coerce(probe_tool: str, key: str, value: Any, kind: str) -> Any:

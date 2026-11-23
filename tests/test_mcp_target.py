@@ -215,6 +215,20 @@ def test_an_in_band_refusal_counts_as_refused_with_a_refuse_when_rule():
     assert "over budget" in _attempt(result, "single charge").state_after["refusal_reasons"][0]
 
 
+
+
+def test_the_servers_reason_survives_a_long_refusal_record():
+    """almega answers a refused payment with a whole transaction record, its
+    reason last. Without `reason` the probe kept the first 200 characters of
+    rule-plus-JSON, which ended before the explanation began."""
+    tools = {**TOOLS, "charge": {**CHARGE, "refuse_when": IN_BAND_RULE, "reason": "reason"}}
+    with fake(env={"FAKE_REFUSAL": "in_band_record"}, tools=tools, reset={"tool": "wipe"}) as target:
+        result = SpendCapProbe().run(target)
+    assert not result.findings, [f.title for f in result.findings]
+    recorded = _attempt(result, "single charge").state_after["refusal_reasons"][0]
+    assert recorded.startswith("make_payment refused (status='declined'): over budget: 0 + 150 > 100; result: {"), recorded
+
+
 def test_without_the_rule_an_in_band_refusal_looks_like_an_overspend():
     """Why refuse_when exists: a declined charge with no isError reads as paid."""
     with fake(env={"FAKE_REFUSAL": "in_band"}, reset={"tool": "wipe"}) as target:

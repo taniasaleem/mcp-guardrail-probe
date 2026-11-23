@@ -20,6 +20,8 @@ it needs:
     FAKE_REFUSAL=in_band          a payment over budget comes back as an
                                   ordinary {"status": "declined"} result
                                   instead of an isError result
+    FAKE_REFUSAL=in_band_record   likewise, but as a whole transaction record
+                                  with the reason as its last field
     FAKE_SPEND_CAP=<n>            the cap is fixed at start-up; set_budget is
                                   not exposed (the out-of-band case)
     FAKE_APPROVAL_LIMIT=<n>       likewise for the approval ceiling
@@ -39,6 +41,7 @@ from mcp.shared.exceptions import MCPError
 
 BUG = os.environ.get("FAKE_BUG", "")
 IN_BAND = os.environ.get("FAKE_REFUSAL") == "in_band"
+IN_BAND_RECORD = os.environ.get("FAKE_REFUSAL") == "in_band_record"
 PRESET_CAP = os.environ.get("FAKE_SPEND_CAP")
 PRESET_LIMIT = os.environ.get("FAKE_APPROVAL_LIMIT")
 
@@ -92,6 +95,22 @@ async def _pay(amount_cents: int, request_id: str | None) -> dict:
         await asyncio.sleep(0.05)  # the window a lost update needs
     if state["cap"] is not None and current + amount_cents > state["cap"]:
         message = f"over budget: {current} + {amount_cents} > {state['cap']}"
+        if IN_BAND_RECORD:
+            # A whole transaction record with the explanation last, the way
+            # almega-mcp's pay answers: the reason sits past the first few
+            # hundred characters of the JSON.
+            return {
+                "id": f"tx_{len(state['seen']) + 1:04d}",
+                "agent_id": "probe",
+                "merchant": "mcp-guardrail-probe-merchant",
+                "amount": float(amount_cents),
+                "currency": "usd",
+                "category": "probe",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "card_last4": "4242",
+                "status": "declined",
+                "reason": message,
+            }
         if IN_BAND:
             return {"status": "declined", "reason": message}
         raise ToolError(message)
