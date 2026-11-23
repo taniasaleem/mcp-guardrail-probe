@@ -6,7 +6,8 @@
     "command": "${ALMEGA_VENV}/bin/almega-mcp",
     "env": {
       "FASTMCP_LOG_LEVEL": "WARNING"
-    }
+    },
+    "handshake": "legacy"
   },
   "timeout_seconds": 60,
   "reset": {
@@ -37,6 +38,7 @@
           "present": true
         }
       ],
+      "reason": "error",
       "result": {
         "committed_spend": "spent"
       }
@@ -66,6 +68,10 @@
             "ALLOWED"
           ]
         }
+      ],
+      "reason": [
+        "reason",
+        "error"
       ]
     },
     "set_approval_threshold": {
@@ -97,6 +103,7 @@
           "present": true
         }
       ],
+      "reason": "error",
       "result": {
         "decision": {
           "path": "decision",

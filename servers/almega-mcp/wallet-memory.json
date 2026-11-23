@@ -7,7 +7,8 @@
     "env": {
       "ALMEGA_BACKEND": "memory",
       "FASTMCP_LOG_LEVEL": "WARNING"
-    }
+    },
+    "handshake": "legacy"
   },
   "timeout_seconds": 60,
   "reset": {
@@ -36,7 +37,8 @@
           "path": "error",
           "present": true
         }
-      ]
+      ],
+      "reason": "error"
     },
     "get_spending_limit": {
       "tool": "get_wallet",
@@ -49,6 +51,7 @@
           "present": true
         }
       ],
+      "reason": "error",
       "result": {
         "committed_spend": "spent_this_month"
       }
@@ -78,6 +81,10 @@
             "APPROVED"
           ]
         }
+      ],
+      "reason": [
+        "reason",
+        "error"
       ]
     },
     "set_approval_threshold": {
@@ -101,7 +108,8 @@
           "path": "error",
           "present": true
         }
-      ]
+      ],
+      "reason": "error"
     },
     "submit_for_approval": {
       "tool": "pay",
@@ -119,6 +127,7 @@
           "present": true
         }
       ],
+      "reason": "error",
       "result": {
         "decision": {
           "path": "status",
