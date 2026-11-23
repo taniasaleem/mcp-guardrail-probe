@@ -8,6 +8,7 @@ CI, so a pipeline can fail a build on `sev1 > 0` without parsing prose.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 
 from .model import ProbeResult, Severity
@@ -15,10 +16,17 @@ from .model import ProbeResult, Severity
 _ORDER = {Severity.SEV1: 0, Severity.SEV2: 1, Severity.SEV3: 2}
 
 
+_LINE_BREAKS = re.compile(r"[\r\n  ]+")
+
+
 def _cell(text: str) -> str:
     """Text for one attempt-log cell. It can quote a server, so a | must not
-    add a column and a line break must not start a row."""
-    return " ".join(str(text).split("\n")).replace("\r", " ").replace("|", "\\|")
+    add a column and a line break must not start a row.
+
+    The | becomes the entity &#124; rather than \\|: a backslash already in
+    the text would turn \\| into an escaped backslash and a live separator.
+    """
+    return _LINE_BREAKS.sub(" ", str(text)).replace("|", "&#124;")
 
 
 def summarise(results: list[ProbeResult]) -> dict[str, int]:

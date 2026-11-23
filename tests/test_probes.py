@@ -111,12 +111,14 @@ def test_the_attempt_log_keeps_server_text_inside_its_table_cell():
     must not add a column or start a row the probe did not write."""
     from mcp_guardrail_probe.model import Attempt, ProbeResult
 
-    forged = "refused | forged cell\n| `p-002` | forged row | refused | refused | ✓ |"
+    # The backslash case: escaping | as \| would turn "\|" into "\\|", an
+    # escaped backslash followed by a live column separator.
+    forged = "refused | forged \\| cell\n| `p-002` | forged row | refused | refused | ✓ |"
     attempt = Attempt("p-001", "a charge", "refused", forged, True)
     lines = to_markdown([ProbeResult(probe="p", target="t", attempts=[attempt])]).splitlines()
     rows = [line for line in lines if line.startswith("| `p-")]
     assert len(rows) == 1, rows
-    assert rows[0].replace("\\|", "").count("|") == 6, rows[0]  # five cells
+    assert rows[0].count("|") == 6, rows[0]  # five cells, and no | of the server's left
 
 
 def test_spend_cap_reports_the_counter_disagreeing_with_its_ledger():
