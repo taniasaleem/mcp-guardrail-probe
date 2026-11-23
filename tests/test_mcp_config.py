@@ -252,6 +252,38 @@ def _result(*texts, is_error=False, structured=None):
     )
 
 
+@pytest.mark.parametrize(
+    "secret, kept",
+    [
+        (KEY, ""),
+        ("rk_live_" + "Zz9" * 8, ""),
+        ("whsec_" + "Q7" * 12, ""),
+        ("Bearer eyJhbGciOi.J9eyJzdWIi.OiIxMjM0", "Bearer "),
+        ("Basic dXNlcjpwYXNzd29yZA==", "Basic "),
+        ("Token 9f8e7d6c5b4a39281706f5e4", "Token "),
+        ("sk-ant-api03-" + "Ab_-" * 8, ""),
+        ("ghp_" + "Xy12" * 9, ""),
+        ("github_pat_11ABCDEFG0_" + "aB3" * 10, ""),
+        ("xoxb-1234567890-0987654321-" + "Kq" * 10, ""),
+        ("https://probe:s3cr3t-pa55@api.example.test/v1", "https://"),
+    ],
+)
+def test_credential_shapes_are_redacted(secret, kept):
+    with pytest.raises(ToolError) as refused:
+        parse_result("pay", _result(f"denied: {secret} end", is_error=True))
+    message = str(refused.value)
+    assert message.startswith(f"denied: {kept}[redacted]"), message
+    assert message.endswith(" end"), message
+
+
+def test_words_that_only_resemble_a_credential_are_kept():
+    """Redaction goes by known shapes, so a refusal's evidence survives it."""
+    text = "risk-free sk-ill: token tx_0001 Basically declined, see https://api.example.test/v1"
+    with pytest.raises(ToolError) as refused:
+        parse_result("pay", _result(text, is_error=True))
+    assert str(refused.value) == text
+
+
 def test_an_is_error_message_is_one_bounded_line_without_keys():
     text = f"declined\n| forged | row |\nBearer {KEY} " + "y" * 5000
     with pytest.raises(ToolError) as refused:

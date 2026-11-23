@@ -73,9 +73,17 @@ _MISSING = object()
 
 #: Control characters, newlines included: a server must not start a report line.
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
-#: Shapes of credential a server may echo back in an error: Stripe secret,
-#: restricted and webhook keys, and bearer tokens.
-_SECRET = re.compile(r"\b(?:(?:sk|rk)_(?:test|live)_|whsec_)[A-Za-z0-9]+|\bBearer\s+[A-Za-z0-9._~+/=-]+")
+#: Shapes of credential a server may echo back in an error: prefixed keys
+#: (Stripe secret, restricted and webhook keys; sk- API keys; GitHub and
+#: Slack tokens), at least 16 characters after the prefix so ordinary words
+#: survive; the credential in a Bearer, Basic or Token header; and the
+#: user:password part of a URL. A known shape, not a guess from randomness:
+#: transaction ids and amounts are the report's evidence and must stay.
+_SECRET = re.compile(
+    r"\b(?:(?:sk|rk)_(?:test|live)_|whsec_|gh[pousr]_|github_pat_|xox[abprs]-|sk-)[A-Za-z0-9_-]{16,}"
+    r"|\b(?P<scheme>Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]+"
+    r"|(?<=://)[^/\s:@]+:[^/\s@]+(?=@)"
+)
 
 
 def _server_text(text: str, limit: int) -> str:
@@ -87,7 +95,9 @@ def _server_text(text: str, limit: int) -> str:
     `limit` characters.
     """
     text = _CONTROL.sub(" ", text).strip()
-    text = _SECRET.sub(lambda m: "Bearer [redacted]" if m.group().startswith("Bearer") else "[redacted]", text)
+    text = _SECRET.sub(
+        lambda m: f"{m.group('scheme')} [redacted]" if m.group("scheme") else "[redacted]", text
+    )
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
